@@ -1,9 +1,43 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const DAY_START_MINUTES = 6 * 60;
 const NIGHT_START_MINUTES = 22 * 60;
+const MIN_SESSION_MINUTES = 30;
+const BREAK_MINUTES = 15;
+const MAX_PLANNING_DAYS = 35;
 
-function estimateCourseDifficulty(courseName) {
+const DAY_INDEX = {
+  Sunday: 0,
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+};
+
+const PRIORITY_VALUE = {
+  High: 3,
+  Medium: 2,
+  Low: 1,
+};
+
+const LEVEL_VALUE = {
+  High: 3,
+  Medium: 2,
+  Low: 1,
+};
+
+function safeParse(key, fallback = []) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    return value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function estimateCourseDifficulty(courseName = "") {
   const name = courseName.toLowerCase();
 
   if (
@@ -34,7 +68,7 @@ function estimateCourseDifficulty(courseName) {
   return "Low";
 }
 
-function estimateTaskWeight(taskTitle) {
+function estimateTaskWeight(taskTitle = "") {
   const title = taskTitle.toLowerCase();
 
   if (
@@ -43,7 +77,8 @@ function estimateTaskWeight(taskTitle) {
     title.includes("final") ||
     title.includes("midterm") ||
     title.includes("research") ||
-    title.includes("presentation")
+    title.includes("presentation") ||
+    title.includes("essay")
   ) {
     return "High";
   }
@@ -62,27 +97,31 @@ function estimateTaskWeight(taskTitle) {
 
 function estimateTotalWorkMinutes(type, difficulty, taskWeight) {
   if (type === "Exam Review") {
-    if (difficulty === "High") return 240;
-    if (difficulty === "Medium") return 180;
-    return 120;
+    if (difficulty === "High") return 300;
+    if (difficulty === "Medium") return 210;
+    return 150;
   }
 
-  if (taskWeight === "High" && difficulty === "High") return 300;
-  if (taskWeight === "High") return 240;
-  if (taskWeight === "Medium" && difficulty === "High") return 180;
-  if (taskWeight === "Medium") return 120;
+  if (type === "Course Review") {
+    if (difficulty === "High") return 120;
+    if (difficulty === "Medium") return 90;
+    return 60;
+  }
 
-  return 60;
+  if (taskWeight === "High" && difficulty === "High") return 360;
+  if (taskWeight === "High") return 270;
+  if (taskWeight === "Medium" && difficulty === "High") return 210;
+  if (taskWeight === "Medium") return 150;
+  return 75;
 }
 
 function getSessionLength(difficulty, taskWeight) {
   if (difficulty === "High" || taskWeight === "High") return 75;
   if (difficulty === "Medium" || taskWeight === "Medium") return 60;
-
   return 45;
 }
 
-function getCourseCategory(courseName) {
+function getCourseCategory(courseName = "") {
   const name = courseName.toLowerCase();
 
   if (
@@ -103,11 +142,7 @@ function getCourseCategory(courseName) {
     return "Mathematics";
   }
 
-  if (
-    name.includes("eng") ||
-    name.includes("fra") ||
-    name.includes("writing")
-  ) {
+  if (name.includes("eng") || name.includes("fra") || name.includes("writing")) {
     return "Language / Writing";
   }
 
@@ -118,21 +153,144 @@ function getCourseCategory(courseName) {
   return "General";
 }
 
+function timeToMinutes(time) {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function minutesToTime(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
+    2,
+    "0"
+  )}`;
+}
+
+function toLocalDateString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDate(dateString) {
+  if (!dateString) return null;
+  const date = new Date(`${dateString}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function daysBetween(fromDate, toDate) {
+  const day = 24 * 60 * 60 * 1000;
+  return Math.ceil((toDate - fromDate) / day);
+}
+
+function formatReadableDate(dateString) {
+  const date = parseDate(dateString);
+  if (!date) return dateString;
+
+  return date.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function getTaskScore(task, sessionDate) {
+  const dueDate = parseDate(task.date);
+  const daysLeft = dueDate ? daysBetween(sessionDate, dueDate) : 30;
+
+  let urgencyScore;
+  if (daysLeft <= 0) urgencyScore = 12;
+  else if (daysLeft === 1) urgencyScore = 10;
+  else if (daysLeft <= 3) urgencyScore = 8;
+  else if (daysLeft <= 7) urgencyScore = 6;
+  else if (daysLeft <= 14) urgencyScore = 3;
+  else urgencyScore = 1;
+
+  const priorityScore = (PRIORITY_VALUE[task.priority] || 2) * 3;
+  const difficultyScore = (LEVEL_VALUE[task.difficulty] || 2) * 1.5;
+  const workloadScore = (LEVEL_VALUE[task.taskWeight] || 2) * 1.5;
+  const examBonus = task.type === "Exam Review" ? 2.5 : 0;
+
+  /*
+    Fairness penalty prevents one task from taking every session.
+    A high-priority task still remains important, but other urgent work
+    can start before it is fully completed.
+  */
+  const repetitionPenalty = task.sessionsScheduled * 1.8;
+  const progressPenalty =
+    task.totalMinutes > 0
+      ? ((task.totalMinutes - task.remainingMinutes) / task.totalMinutes) * 2
+      : 0;
+
+  return (
+    urgencyScore +
+    priorityScore +
+    difficultyScore +
+    workloadScore +
+    examBonus -
+    repetitionPenalty -
+    progressPenalty
+  );
+}
+
+function buildPlanningSlots(availability, lastDeadline) {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+
+  const requestedEnd = lastDeadline ? parseDate(lastDeadline) : null;
+  const maximumEnd = new Date(today);
+  maximumEnd.setDate(maximumEnd.getDate() + MAX_PLANNING_DAYS);
+
+  const planningEnd =
+    requestedEnd && requestedEnd < maximumEnd ? requestedEnd : maximumEnd;
+
+  const slots = [];
+
+  for (
+    let cursor = new Date(today);
+    cursor <= planningEnd;
+    cursor.setDate(cursor.getDate() + 1)
+  ) {
+    availability.forEach((slot) => {
+      if (DAY_INDEX[slot.day] !== cursor.getDay()) return;
+
+      const enteredStart = timeToMinutes(slot.startTime);
+      const enteredEnd = timeToMinutes(slot.endTime);
+      const startMinutes = Math.max(enteredStart, DAY_START_MINUTES);
+      const endMinutes = Math.min(enteredEnd, NIGHT_START_MINUTES);
+
+      if (endMinutes - startMinutes < MIN_SESSION_MINUTES) return;
+
+      slots.push({
+        id: `${toLocalDateString(cursor)}-${slot.id}`,
+        day: slot.day,
+        date: toLocalDateString(cursor),
+        startMinutes,
+        endMinutes,
+      });
+    });
+  }
+
+  return slots.sort((a, b) => {
+    const dateDifference = parseDate(a.date) - parseDate(b.date);
+    if (dateDifference !== 0) return dateDifference;
+    return a.startMinutes - b.startMinutes;
+  });
+}
+
 function StudyPlanner() {
-  const [availability, setAvailability] = useState(() => {
-    const savedAvailability = localStorage.getItem("availability");
-    return savedAvailability ? JSON.parse(savedAvailability) : [];
-  });
+  const [availability, setAvailability] = useState(() =>
+    safeParse("availability")
+  );
 
-  const [studyPlan, setStudyPlan] = useState(() => {
-    const savedPlan = localStorage.getItem("studyPlan");
-    return savedPlan ? JSON.parse(savedPlan) : [];
-  });
+  const [studyPlan, setStudyPlan] = useState(() => safeParse("studyPlan"));
 
-  const [insights, setInsights] = useState(() => {
-    const savedInsights = localStorage.getItem("studyInsights");
-    return savedInsights ? JSON.parse(savedInsights) : null;
-  });
+  const [insights, setInsights] = useState(() =>
+    safeParse("studyInsights", null)
+  );
 
   const [day, setDay] = useState("Monday");
   const [startTime, setStartTime] = useState("");
@@ -149,21 +307,6 @@ function StudyPlanner() {
   useEffect(() => {
     localStorage.setItem("studyInsights", JSON.stringify(insights));
   }, [insights]);
-
-  function timeToMinutes(time) {
-    const [hours, minutes] = time.split(":").map(Number);
-    return hours * 60 + minutes;
-  }
-
-  function minutesToTime(totalMinutes) {
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
-      2,
-      "0"
-    )}`;
-  }
 
   function addAvailability(event) {
     event.preventDefault();
@@ -186,36 +329,37 @@ function StudyPlanner() {
 
     if (containsNightHours) {
       const accepted = window.confirm(
-        "This availability includes night hours. My Academia Buddy will only schedule study sessions between 06:00 and 22:00. Do you still want to save this availability?"
+        "This availability includes night hours. The planner will only use the period between 06:00 and 22:00. Do you still want to save it?"
       );
 
       if (!accepted) return;
     }
 
-    const newAvailability = {
-      id: Date.now(),
-      day,
-      startTime,
-      endTime,
-      warning: containsNightHours
-        ? "Night hours detected. Only the period between 06:00 and 22:00 will be used."
-        : "",
-    };
+    setAvailability((current) => [
+      ...current,
+      {
+        id: Date.now(),
+        day,
+        startTime,
+        endTime,
+        warning: containsNightHours
+          ? "Night hours detected. Only 06:00–22:00 will be used."
+          : "",
+      },
+    ]);
 
-    setAvailability([...availability, newAvailability]);
     setStartTime("");
     setEndTime("");
   }
 
   function deleteAvailability(id) {
-    setAvailability(availability.filter((slot) => slot.id !== id));
+    setAvailability((current) => current.filter((slot) => slot.id !== id));
   }
 
   function buildTasks() {
-    const assignments =
-      JSON.parse(localStorage.getItem("assignments")) || [];
-
-    const exams = JSON.parse(localStorage.getItem("exams")) || [];
+    const courses = safeParse("courses");
+    const assignments = safeParse("assignments");
+    const exams = safeParse("exams");
 
     const tasks = [];
 
@@ -226,7 +370,6 @@ function StudyPlanner() {
         const difficulty = estimateCourseDifficulty(course);
         const taskWeight = estimateTaskWeight(assignment.title);
         const category = getCourseCategory(course);
-
         const totalMinutes = estimateTotalWorkMinutes(
           "Assignment",
           difficulty,
@@ -246,6 +389,7 @@ function StudyPlanner() {
           sessionLength: getSessionLength(difficulty, taskWeight),
           totalMinutes,
           remainingMinutes: totalMinutes,
+          sessionsScheduled: 0,
         });
       });
 
@@ -253,7 +397,6 @@ function StudyPlanner() {
       const course = exam.course || "General";
       const difficulty = estimateCourseDifficulty(course);
       const category = getCourseCategory(course);
-
       const totalMinutes = estimateTotalWorkMinutes(
         "Exam Review",
         difficulty,
@@ -273,8 +416,45 @@ function StudyPlanner() {
         sessionLength: getSessionLength(difficulty, "High"),
         totalMinutes,
         remainingMinutes: totalMinutes,
+        sessionsScheduled: 0,
       });
     });
+
+    /*
+      If the user has courses but no pending assignment or exam,
+      the planner can still create useful general review sessions.
+    */
+    if (tasks.length === 0 && courses.length > 0) {
+      const fallbackDate = new Date();
+      fallbackDate.setDate(fallbackDate.getDate() + 7);
+
+      courses.forEach((courseData) => {
+        const course = courseData.name || "General course";
+        const difficulty = estimateCourseDifficulty(course);
+        const category = getCourseCategory(course);
+        const totalMinutes = estimateTotalWorkMinutes(
+          "Course Review",
+          difficulty,
+          "Medium"
+        );
+
+        tasks.push({
+          id: `course-${courseData.id}`,
+          type: "Course Review",
+          title: `${course} weekly review`,
+          course,
+          date: toLocalDateString(fallbackDate),
+          priority: difficulty === "High" ? "High" : "Medium",
+          difficulty,
+          taskWeight: "Medium",
+          category,
+          sessionLength: getSessionLength(difficulty, "Medium"),
+          totalMinutes,
+          remainingMinutes: totalMinutes,
+          sessionsScheduled: 0,
+        });
+      });
+    }
 
     return tasks;
   }
@@ -288,82 +468,74 @@ function StudyPlanner() {
     }
 
     if (tasks.length === 0) {
-      alert("Please add at least one pending assignment or exam.");
+      alert(
+        "Add at least one course, pending assignment, or exam before generating a plan."
+      );
       return;
     }
 
-    const priorityOrder = {
-      High: 1,
-      Medium: 2,
-      Low: 3,
-    };
+    const validDates = tasks
+      .map((task) => task.date)
+      .filter(Boolean)
+      .sort();
 
-    tasks.sort((firstTask, secondTask) => {
-      const dateDifference =
-        new Date(firstTask.date) - new Date(secondTask.date);
+    const slots = buildPlanningSlots(
+      availability,
+      validDates[validDates.length - 1]
+    );
 
-      if (dateDifference !== 0) return dateDifference;
-
-      return (
-        priorityOrder[firstTask.priority] -
-        priorityOrder[secondTask.priority]
+    if (slots.length === 0) {
+      alert(
+        "No usable study period was found between 06:00 and 22:00. Please add another availability."
       );
-    });
+      return;
+    }
 
     const generatedPlan = [];
-    const breakLength = 15;
 
-    availability.forEach((slot) => {
-      const enteredStart = timeToMinutes(slot.startTime);
-      const enteredEnd = timeToMinutes(slot.endTime);
+    slots.forEach((slot) => {
+      let currentTime = slot.startMinutes;
+      const sessionDate = parseDate(slot.date);
 
-      /*
-        Even if the user enters night availability,
-        the planner only schedules between 06:00 and 22:00.
-      */
-      let currentTime = Math.max(enteredStart, DAY_START_MINUTES);
-      const slotEnd = Math.min(enteredEnd, NIGHT_START_MINUTES);
+      while (currentTime + MIN_SESSION_MINUTES <= slot.endMinutes) {
+        const eligibleTasks = tasks.filter((task) => {
+          if (task.remainingMinutes <= 0) return false;
 
-      if (slotEnd - currentTime < 15) {
-        return;
-      }
+          const dueDate = parseDate(task.date);
+          if (!dueDate) return true;
 
-      while (currentTime < slotEnd) {
-        const unfinishedTasks = tasks.filter(
-          (task) => task.remainingMinutes > 0
-        );
-
-        if (unfinishedTasks.length === 0) break;
-
-        unfinishedTasks.sort((firstTask, secondTask) => {
-          const dateDifference =
-            new Date(firstTask.date) - new Date(secondTask.date);
-
-          if (dateDifference !== 0) return dateDifference;
-
-          return (
-            priorityOrder[firstTask.priority] -
-            priorityOrder[secondTask.priority]
-          );
+          /*
+            A task can be scheduled on its deadline, but never after it.
+          */
+          return sessionDate <= dueDate;
         });
 
-        const task = unfinishedTasks[0];
-        const remainingSlotTime = slotEnd - currentTime;
+        if (eligibleTasks.length === 0) break;
 
+        eligibleTasks.sort(
+          (a, b) => getTaskScore(b, sessionDate) - getTaskScore(a, sessionDate)
+        );
+
+        const task = eligibleTasks[0];
+        const remainingSlotTime = slot.endMinutes - currentTime;
         const sessionLength = Math.min(
           task.sessionLength,
           task.remainingMinutes,
           remainingSlotTime
         );
 
-        if (sessionLength < 15) break;
+        if (sessionLength < MIN_SESSION_MINUTES) break;
 
         const sessionStart = currentTime;
         const sessionEnd = currentTime + sessionLength;
+        const daysUntilDue = parseDate(task.date)
+          ? daysBetween(sessionDate, parseDate(task.date))
+          : null;
 
         generatedPlan.push({
-          id: `${task.id}-${slot.day}-${sessionStart}-${Math.random()}`,
+          id: `${task.id}-${slot.date}-${sessionStart}-${Math.random()}`,
           taskId: task.id,
+          date: slot.date,
           day: slot.day,
           startTime: minutesToTime(sessionStart),
           endTime: minutesToTime(sessionEnd),
@@ -378,50 +550,60 @@ function StudyPlanner() {
           sessionLength,
           completed: false,
           recommendation:
-            task.category === "Programming / Software"
+            task.type === "Exam Review"
+              ? "Review key concepts, practise questions, and focus on weak areas."
+              : task.category === "Programming / Software"
               ? "Use this session for implementation, debugging, testing, or code review."
               : task.category === "Mathematics"
               ? "Use this session for practice problems and worked examples."
-              : task.type === "Exam Review"
-              ? "Review notes, practise questions, and identify weak areas."
-              : "Make steady progress and leave time for final review.",
+              : task.type === "Course Review"
+              ? "Review recent notes and prepare for the next class."
+              : "Make measurable progress and leave time for a final review.",
           explanation: [
-            `${task.course} was selected because it is connected to an upcoming ${task.type.toLowerCase()}.`,
-            `The system estimated the course difficulty as ${task.difficulty}.`,
-            `The task workload was estimated as ${task.taskWeight}.`,
-            `The complete work was estimated at about ${Math.floor(
-              task.totalMinutes / 60
-            )}h ${task.totalMinutes % 60}min.`,
-            `This ${sessionLength}-minute session fits inside your ${slot.day} availability.`,
-            "The planner avoids scheduling sessions between 22:00 and 06:00.",
+            `${task.title} was selected using a combined urgency, priority, difficulty, and workload score.`,
+            `Its priority is ${task.priority}, its estimated difficulty is ${task.difficulty}, and its workload is ${task.taskWeight}.`,
+            daysUntilDue === null
+              ? "No valid deadline was available, so the planner used its general priority."
+              : `The deadline is ${Math.max(
+                  daysUntilDue,
+                  0
+                )} day(s) from this study session.`,
+            `The planner does not wait for a low-priority task to be completely finished before starting a more urgent or demanding task.`,
+            `This ${sessionLength}-minute session fits your availability on ${formatReadableDate(
+              slot.date
+            )}.`,
           ],
         });
 
         task.remainingMinutes -= sessionLength;
+        task.sessionsScheduled += 1;
         currentTime = sessionEnd;
 
-        const moreWorkExists = tasks.some(
-          (currentTask) => currentTask.remainingMinutes > 0
-        );
+        const moreEligibleWork = tasks.some((candidate) => {
+          if (candidate.remainingMinutes <= 0) return false;
+          const dueDate = parseDate(candidate.date);
+          return !dueDate || sessionDate <= dueDate;
+        });
 
-        const enoughTimeForBreakAndSession =
-          currentTime + breakLength + 15 <= slotEnd;
-
-        if (moreWorkExists && enoughTimeForBreakAndSession) {
+        if (
+          moreEligibleWork &&
+          currentTime + BREAK_MINUTES + MIN_SESSION_MINUTES <= slot.endMinutes
+        ) {
           generatedPlan.push({
-            id: `break-${slot.day}-${currentTime}-${Math.random()}`,
+            id: `break-${slot.date}-${currentTime}-${Math.random()}`,
+            date: slot.date,
             day: slot.day,
             startTime: minutesToTime(currentTime),
-            endTime: minutesToTime(currentTime + breakLength),
+            endTime: minutesToTime(currentTime + BREAK_MINUTES),
             type: "Break",
             title: "Short break",
             course: "Rest",
             completed: false,
             recommendation:
-              "Take a short break before continuing your work.",
+              "Take a short break before continuing or switching subjects.",
           });
 
-          currentTime += breakLength;
+          currentTime += BREAK_MINUTES;
         }
       }
     });
@@ -436,7 +618,6 @@ function StudyPlanner() {
     );
 
     const categories = {};
-
     studySessions.forEach((item) => {
       categories[item.category] =
         (categories[item.category] || 0) + item.sessionLength;
@@ -447,42 +628,45 @@ function StudyPlanner() {
       .map((task) => ({
         title: task.title,
         course: task.course,
+        date: task.date,
         remainingMinutes: task.remainingMinutes,
       }));
 
     const hardestCourse =
-      studySessions.find((item) => item.difficulty === "High")?.course ||
-      "No demanding course detected";
+      [...tasks]
+        .sort(
+          (a, b) =>
+            (LEVEL_VALUE[b.difficulty] || 0) -
+            (LEVEL_VALUE[a.difficulty] || 0)
+        )[0]?.course || "No course detected";
 
     const nearestDeadline =
-      tasks.length > 0
-        ? `${tasks[0].title} (${tasks[0].date})`
-        : "No deadline detected";
+      [...tasks]
+        .filter((task) => task.date)
+        .sort((a, b) => parseDate(a.date) - parseDate(b.date))[0] || null;
 
     setStudyPlan(generatedPlan);
-
     setInsights({
       totalMinutes,
       totalSessions: studySessions.length,
       hardestCourse,
-      nearestDeadline,
+      nearestDeadline: nearestDeadline
+        ? `${nearestDeadline.title} (${nearestDeadline.date})`
+        : "No deadline detected",
       categories,
       unscheduledTasks,
       recommendation:
         unscheduledTasks.length === 0
-          ? "All estimated work was successfully distributed across your available study periods."
-          : "Some work could not be scheduled. Add more availability before the nearest deadlines.",
+          ? "All estimated work was distributed across your available periods before its deadlines."
+          : "Some work could not be scheduled before its deadline. Add more availability or reduce your workload.",
     });
   }
 
   function toggleSessionCompleted(sessionId) {
-    setStudyPlan(
-      studyPlan.map((session) =>
+    setStudyPlan((current) =>
+      current.map((session) =>
         session.id === sessionId
-          ? {
-              ...session,
-              completed: !session.completed,
-            }
+          ? { ...session, completed: !session.completed }
           : session
       )
     );
@@ -493,8 +677,9 @@ function StudyPlanner() {
     setInsights(null);
   }
 
-  const taskSessions = studyPlan.filter(
-    (session) => session.type !== "Break"
+  const taskSessions = useMemo(
+    () => studyPlan.filter((session) => session.type !== "Break"),
+    [studyPlan]
   );
 
   const completedSessions = taskSessions.filter(
@@ -511,33 +696,29 @@ function StudyPlanner() {
       <div className="page-header">
         <div>
           <h1>Smart Study Planner</h1>
-
           <p>
-            Generate realistic study sessions while protecting your sleep and
-            tracking your progress.
+            Build a realistic plan from your courses, pending assignments,
+            exams, deadlines, priorities, and availability.
           </p>
         </div>
       </div>
 
       <section className="planner-section">
-        <h2>My Availability</h2>
+        <h2>My Weekly Availability</h2>
 
         <p className="planner-rule">
-          Study sessions are only scheduled between 06:00 and 22:00.
+          Availability repeats weekly. Sessions are only scheduled between
+          06:00 and 22:00.
         </p>
 
-        <form
-          className="form availability-form"
-          onSubmit={addAvailability}
-        >
+        <form className="form availability-form" onSubmit={addAvailability}>
           <select value={day} onChange={(event) => setDay(event.target.value)}>
-            <option>Monday</option>
-            <option>Tuesday</option>
-            <option>Wednesday</option>
-            <option>Thursday</option>
-            <option>Friday</option>
-            <option>Saturday</option>
-            <option>Sunday</option>
+            {Object.keys(DAY_INDEX)
+              .filter((name) => name !== "Sunday")
+              .concat("Sunday")
+              .map((name) => (
+                <option key={name}>{name}</option>
+              ))}
           </select>
 
           <input
@@ -565,10 +746,7 @@ function StudyPlanner() {
                   <strong>
                     {slot.day}: {slot.startTime} - {slot.endTime}
                   </strong>
-
-                  {slot.warning && (
-                    <p className="warning">{slot.warning}</p>
-                  )}
+                  {slot.warning && <p className="warning">{slot.warning}</p>}
                 </div>
 
                 <button
@@ -590,7 +768,6 @@ function StudyPlanner() {
           <button type="button" onClick={generatePlan}>
             Generate Smart Plan
           </button>
-
           <button type="button" onClick={clearPlan}>
             Clear Plan
           </button>
@@ -653,7 +830,7 @@ function StudyPlanner() {
 
                 {insights.unscheduledTasks.map((task, index) => (
                   <p key={`${task.title}-${index}`}>
-                    {task.course} — {task.title}:{" "}
+                    {task.course} — {task.title} ({task.date || "no date"}):{" "}
                     {Math.floor(task.remainingMinutes / 60)}h{" "}
                     {task.remainingMinutes % 60}min remaining
                   </p>
@@ -677,10 +854,9 @@ function StudyPlanner() {
                 >
                   <div>
                     <strong>{session.title}</strong>
-
                     <p>
-                      {session.day}, {session.startTime} - {session.endTime} •{" "}
-                      {session.course}
+                      {formatReadableDate(session.date)}, {session.startTime} -{" "}
+                      {session.endTime} • {session.course}
                     </p>
                   </div>
 
@@ -709,7 +885,8 @@ function StudyPlanner() {
               >
                 <div>
                   <strong>
-                    {item.day}, {item.startTime} - {item.endTime}
+                    {formatReadableDate(item.date)}, {item.startTime} -{" "}
+                    {item.endTime}
                   </strong>
 
                   <p>
