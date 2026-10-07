@@ -23,10 +23,13 @@ describe('Storage Service', () => {
     expect(safeGetItem('corrupted_key', { fallback: true })).toEqual({ fallback: true });
   });
 
-  it('sets and retrieves valid data', () => {
+  it('sets and retrieves valid data, and removes keys properly', () => {
     const courses = [{ id: 1, name: 'SEG2105' }];
     expect(safeSetItem(STORAGE_KEYS.COURSES, courses)).toBe(true);
     expect(safeGetItem(STORAGE_KEYS.COURSES, [])).toEqual(courses);
+
+    safeRemoveItem(STORAGE_KEYS.COURSES);
+    expect(safeGetItem(STORAGE_KEYS.COURSES, [])).toEqual([]);
   });
 
   it('migrates legacy v1 schema to v2 schema cleanly', () => {

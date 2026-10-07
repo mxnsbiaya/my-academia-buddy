@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   safeGetItem,
   safeSetItem,
@@ -10,8 +10,7 @@ import {
   STORAGE_KEYS,
 } from '../services/storage';
 import { generateStudyPlan } from '../services/scheduler';
-
-const AppContext = createContext(null);
+import { AppContext } from './AppContextDefinition';
 
 export function AppProvider({ children }) {
   // Initialize storage migration once
@@ -338,12 +337,4 @@ export function AppProvider({ children }) {
   );
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
-}
-
-export function useApp() {
-  const context = useContext(AppContext);
-  if (!context) {
-    throw new Error('useApp must be used within an AppProvider');
-  }
-  return context;
 }
