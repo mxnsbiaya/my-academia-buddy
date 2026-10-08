@@ -1,12 +1,15 @@
-# System Architecture — My Academia Buddy 2.0
+# System Architecture — Adaptive Academic Coaching Platform
 
 ## 1. Architectural Philosophy
 
-My Academia Buddy 2.0 is designed following **Clean Architecture** principles adapted for modern React applications. The primary goals are:
-- **Separation of Concerns:** Pure business logic (the scheduling engine) is completely decoupled from UI presentation components.
-- **Resilience & Fault Tolerance:** Storage failures, malformed data, and edge-case schedules never crash the application.
-- **Determinism & Explainability:** Every algorithmic decision can be traced, tested, and explained to the user without relying on opaque machine learning models or third-party paid APIs.
-- **Accessibility & Maintainability:** Built with standard web technologies (React 19, Vite 8, pure Vanilla CSS) with zero bloated UI libraries.
+My Academia Buddy is architected around the promise:  
+> *"Your personal academic coach that knows what you need to study, when you need to study it, and how your plan should change when life gets in the way."*
+
+To deliver on this promise without expensive or opaque third-party AI dependencies, the architecture adheres to:
+1. **Separation of Concerns:** Pure domain logic (the deterministic heuristic scheduler and the adaptive coaching recalibrator) are 100% decoupled from web presentation components.
+2. **Explainability & Transparency:** Every session scheduled and every readiness score calculated is 100% explainable through transparent heuristics. Readiness is never misrepresented as a scientific passing probability.
+3. **Adaptive Feedback Loop:** The system adapts its scheduling assumptions (e.g. pace multiplier, available hours, buffer intervals) to observable student behavior through weekly check-ins and session completions.
+4. **Resilience & Privacy-First Persistence:** Works completely client-side in offline-first mode with safe storage fallbacks and automated migrations.
 
 ---
 
@@ -14,106 +17,159 @@ My Academia Buddy 2.0 is designed following **Clean Architecture** principles ad
 
 ```
 src/
-├── context/               # Global state management & action dispatchers
-│   ├── AppContext.jsx     # AppProvider implementation & reactive storage hooks
-│   ├── AppContextDefinition.js # Isolated Context definition (Fast Refresh compliant)
-│   ├── useApp.js          # Custom consumer hook
-│   └── index.js           # Module re-exports
+├── context/                   # Global reactive state management
+│   ├── AppContext.jsx         # AppProvider implementation & coach operations
+│   ├── AppContextDefinition.js# Isolated Context definition (Fast Refresh compliant)
+│   ├── useApp.js              # Custom consumer hook
+│   └── index.js               # Module re-exports
 │
-├── services/              # Pure domain logic & storage abstractions
-│   ├── scheduler.js       # Heuristic scheduling engine & date utilities
-│   └── storage.js         # Safe localStorage persistence, migrations, and backups
+├── services/                  # Pure domain logic & persistence engines
+│   ├── coach.js               # Domain Coaching Engine: check-in generation,
+│   │                          # readiness scores, pace recalibration, missed topics
+│   ├── scheduler.js           # Multi-factor heuristic study planner:
+│   │                          # granular 3-step micro-actions, emergency exam mode,
+│   │                          # adaptive pace buffer, deadline decay scoring
+│   └── storage.js             # Safe localStorage persistence, migrations (v1 → v3),
+│                              # JSON backup/restore, and default CS demo seed
 │
-├── components/            # Reusable, accessible UI components
-│   ├── Badge.jsx          # Priority, difficulty, and status badges
-│   ├── DataModal.jsx      # Backup, JSON restore, sample dataset modal
-│   ├── Header.jsx         # Sticky application header & mobile navigation toggle
-│   ├── Modal.jsx          # Accessible dialog modal (keyboard navigable)
-│   ├── Sidebar.jsx        # Responsive navigation sidebar & badge counters
-│   └── ToastContainer.jsx # Non-blocking floating notification queue
+├── components/                # Reusable, accessible UI components
+│   ├── Badge.jsx              # Priority, difficulty, and status badges
+│   ├── CheckInModal.jsx       # 2-minute interactive weekly academic check-in
+│   ├── ProfileModal.jsx       # Student profile & observed adaptive signals viewer
+│   ├── OnboardingModal.jsx    # Non-judgmental 3-step semester onboarding wizard
+│   ├── DataModal.jsx          # Backup, JSON restore, sample dataset modal
+│   ├── Header.jsx             # Sticky header with weekly check-in & profile actions
+│   ├── Modal.jsx              # Accessible dialog modal (keyboard navigable)
+│   ├── Sidebar.jsx            # Navigation sidebar with coach shortcuts & status
+│   └── ToastContainer.jsx     # Non-blocking floating notification queue
 │
-├── pages/                 # Route-level page views
-│   ├── Dashboard.jsx      # Academic health overview, spotlight session, workload
-│   ├── Courses.jsx        # Course registration, difficulty tiers, progress tracking
-│   ├── Assignments.jsx    # Deliverable tracking, workload hours, filters & sorting
-│   ├── Exams.jsx          # Midterm and final scheduling with prep workloads
-│   └── StudyPlanner.jsx   # Flagship planner: availability, views, explainability
+├── pages/                     # Route-level page views
+│   ├── Dashboard.jsx          # Academic health overview, "What should I do today?"
+│   │                          # daily agenda, observable readiness meters, coach banner
+│   ├── Courses.jsx            # Course registration, weekly syllabus topics accordion,
+│   │                          # topic status/confidence controls, syllabus import preview
+│   ├── Assignments.jsx        # Deliverable tracking, workload hours, filters & sorting
+│   ├── Exams.jsx              # Midterm and final scheduling with prep workloads
+│   └── StudyPlanner.jsx       # Flagship planner: emergency exam mode, concrete micro-steps,
+│                              # availability slots, timeline and explainability views
 │
-├── test/                  # Automated test suites (Vitest + React Testing Library)
-│   ├── setup.js           # Vitest environment setup & localStorage mock
-│   ├── smoke.test.js      # Testing baseline
-│   ├── storage.test.js    # Persistence, migration & backup tests
-│   ├── scheduler.test.js  # Pure algorithmic constraints & scoring tests
-│   ├── context.test.jsx   # Reactive state management tests
-│   └── components.test.jsx# Component integration tests
-│
-├── App.jsx                # Application shell, routing, and provider wrapping
-├── App.css                # Productivity SaaS design system stylesheet
-├── index.css              # Global tokens, reset, typography, and focus styles
-└── main.jsx               # React DOM entry point
+└── test/                      # Automated test suites (Vitest + React Testing Library)
+    ├── setup.js               # Vitest environment setup & localStorage mock
+    ├── smoke.test.js          # Testing baseline
+    ├── storage.test.js        # Persistence, migration & backup tests
+    ├── coach.test.js          # Question generation, readiness, adaptive signals
+    ├── scheduler.test.js      # Micro-step breakdown, pace buffer, emergency mode
+    ├── context.test.jsx       # Reactive state management tests
+    └── components.test.jsx    # Component integration tests
 ```
 
 ---
 
-## 3. High-Level Data Flow
+## 3. Data Model Schema (Storage Schema v3)
 
 ```mermaid
-graph TD
-    User([Student / User]) <--> UI[React Components & Pages]
-    UI <--> Context[AppContext & useApp Hook]
-    Context <--> Storage[Storage Service]
-    Context <--> Scheduler[Pure Scheduling Engine]
-    Storage <--> LocalStorage[(Browser localStorage)]
+erDiagram
+    STUDENT_PROFILE ||--o{ COURSE : registers
+    STUDENT_PROFILE ||--o{ CHECK_IN : completes
+    COURSE ||--o{ SYLLABUS_TOPIC : contains
+    COURSE ||--o{ ASSIGNMENT : assigns
+    COURSE ||--o{ EXAM : schedules
+    SYLLABUS_TOPIC ||--o{ STUDY_SESSION : planned_as
+    ASSIGNMENT ||--o{ STUDY_SESSION : planned_as
+    EXAM ||--o{ STUDY_SESSION : planned_as
 
-    subgraph "Deterministic Domain Engine"
-        Scheduler --> Scoring[Multi-factor Priority Scoring]
-        Scheduler --> Constraints[06:00 - 22:00 & Deadline Constraints]
-        Scheduler --> Spaced[Spaced Repetition & Break Insertion]
-        Scheduler --> Diagnostics[Overload & Impossible Schedule Detection]
-    end
+    STUDENT_PROFILE {
+        string name
+        string program
+        string semester
+        string organizationLevel
+        string preferredLanguage
+        string[] preferredStudyPeriods
+        number weeklyWorkHours
+        string workScheduleSummary
+        number weeklyStudyGoalHours
+        string academicGoal
+        boolean onboardingCompleted
+    }
+
+    SYLLABUS_TOPIC {
+        string id
+        string courseId
+        string courseName
+        number week
+        string title
+        string requiredReading
+        number estimatedHours
+        string status "not_started | attended_lecture | reading_completed | practiced | reviewed"
+        number confidence "1 to 5"
+    }
+
+    CHECK_IN {
+        string id
+        string date
+        number weekNumber
+        object[] responses
+        string notes
+    }
+
+    ADAPTIVE_SIGNALS {
+        number taskCompletionConsistency
+        number paceMultiplier "1.0 to 1.5"
+        number repeatedPostponements
+        number observedWeeklyAvailableHours
+        string[] preferredStudyPeriods
+        string coachInsight
+    }
 ```
 
 ---
 
-## 4. Scheduling Engine Design
+## 4. Adaptive Coaching Feedback Loop
 
-### 4.1 Heuristic Scoring Formula
-For each available time window on `sessionDate`, eligible tasks are ranked using dynamic multi-factor scoring:
-
-$$\text{Score} = \text{Urgency} + \text{Priority} + \text{Difficulty} + \text{Workload} + \text{ExamBonus} - \text{DailyPenalty} - \text{FairnessPenalty}$$
-
-1. **Urgency Score:** Exponential urgency decay as the deadline nears:
-   - Due today ($\le 0$ days): $+15$
-   - 1 day away: $+12$
-   - 2 days away: $+10$
-   - 3–4 days: $+8$
-   - 5–7 days: $+6$
-   - 8–14 days: $+3$
-   - $>14$ days: $+1$
-2. **Priority Score:** Explicit student-defined weighting:
-   - High: $+10.5$
-   - Medium: $+7.0$
-   - Low: $+3.5$
-3. **Difficulty Tier:**
-   - High: $+4.5$
-   - Medium: $+3.0$
-   - Low: $+1.5$
-4. **Workload Weight:** $+1.5$ to $+4.5$ based on total required preparation hours.
-5. **Fixed Exam Bonus:** $+3.0$ to ensure midterm/final reviews are scheduled early.
-6. **Same-Day Repetition Penalty:** $-4.0 \times \text{dailySessions}$ (discourages cramming all sessions into one day and promotes spaced repetition).
-7. **Fairness Penalty:** $-1.5 \times \text{totalSessions}$ (prevents a single high-priority project from starving other urgent coursework).
-
-### 4.2 Hard Constraints
-* **Availability Window:** Sessions are only scheduled during user-defined availability slots.
-* **Permitted Hours:** Sessions are strictly clamped between **06:00 and 22:00**. Any nocturnal hours entered are disregarded to encourage healthy sleep habits.
-* **Deadline Cutoff:** Sessions are never scheduled after the task's deadline date.
-* **Cognitive Breaks:** A 15-minute rest interval is automatically scheduled between consecutive learning blocks.
-* **Preservation of Completed Work:** When regenerating plans, sessions previously flagged as `completed` are locked in place and subtracted from remaining workload.
+```mermaid
+flowchart TD
+    A[Initial Student Profile & Availability] --> B[Syllabus Topics & Deadlines]
+    B --> C[Scheduler Generates Concrete Micro-Steps]
+    C --> D[Student Executes Study Sessions & Daily Agenda]
+    D --> E[Weekly 2-Min Academic Check-In]
+    E -->|Observable Progress & Delays| F[Coach Domain Engine]
+    F -->|Recalibrate Pace Multiplier 1.0x-1.5x| G[Updated Adaptive Signals]
+    F -->|Flag Missed Topics for Recovery| H[Rescheduling Queue]
+    G --> C
+    H --> C
+```
 
 ---
 
-## 5. Security & Data Privacy
+## 5. Backend, Cloud, & Security Architecture Proposal
 
-* **Zero Tracking / Zero Telemetry:** The application operates entirely client-side.
-* **No External API Keys:** No sensitive credentials or paid LLM tokens are bundled or exposed.
-* **Resilient Data Backup:** Students can export and import their full academic workspace via structured JSON backups at any time.
+To transition smoothly from local `localStorage` to multi-device synchronization without breaking the existing product:
+
+### 5.1 Recommended Platform: Supabase (Affordable, Open-Source Firebase Alternative)
+- **Authentication:** Supabase Auth (Email magic links or Google OAuth). Enables passwordless, secure student login.
+- **Relational Database:** PostgreSQL with JSONB columns matching Schema v3.
+- **Row-Level Security (RLS):** Every row in `courses`, `topics`, `assignments`, and `check_ins` is secured with:
+  ```sql
+  ALTER TABLE syllabus_topics ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY "Students can only access own topics" 
+  ON syllabus_topics FOR ALL 
+  USING (auth.uid() = user_id);
+  ```
+- **Student Data Privacy:** Academic syllabi and grades are stored strictly inside the user's RLS boundary. No student data is sent to external LLM APIs.
+
+### 5.2 Scheduled Reminders Architecture (Check-Ins & Deadlines)
+- **The Problem:** A browser-only SPA in `localStorage` cannot send emails or push notifications when closed.
+- **Backend Architecture:**
+  1. **PostgreSQL pg_cron / Edge Function:** Runs daily at midnight UTC to check for pending assignments due within 48h and students due for weekly check-ins.
+  2. **Transactional Email Service:** Resend or SendGrid (free tiers support 3,000 emails/month).
+  3. **Direct Authenticated Magic Links:** Emails contain secure deep links:
+     `https://academia-buddy.app/check-in?token=...` taking the student directly to their 2-minute check-in view.
+  4. **Quiet Hours & Opt-Out Preferences:** User controls notification frequency and quiet hours directly in their profile.
+
+---
+
+## 6. Mobile & PWA Evolution
+
+- **Progressive Web App (PWA):** `manifest.json` and service worker caching strategy (`workbox-precaching` or Vite PWA plugin) can be added to enable desktop and mobile "Add to Home Screen".
+- **React Native / Expo Portability:**
+  Because all coaching heuristics (`src/services/coach.js`) and scheduling logic (`src/services/scheduler.js`) are pure JavaScript modules with zero DOM dependencies, they can be shared directly with a future Expo / React Native project in a shared `/packages/core` workspace.

@@ -1,132 +1,81 @@
-# Product Roadmap & Backend Migration Strategy
+# Product Roadmap & Phased Implementation Strategy
 
-This document outlines the evolutionary milestones for **My Academia Buddy**, including the completed v2.0 release and the proposed architectural migration to a cloud-backed architecture in v3.0.
-
----
-
-## 1. Release Milestones
-
-### ✅ Version 2.0 (Current Production Release)
-- Complete UI/UX redesign into a modern productivity SaaS interface.
-- Decoupled, pure heuristic scheduling engine with constraint satisfaction and fairness rules.
-- Course difficulty tiers, explicit workload estimations, and priority weights.
-- Preservation of completed sessions across plan recalculations.
-- Interactive explainability accordions ("Why was this scheduled?").
-- Impossible schedule detection and workload deficit warnings.
-- Versioned storage persistence with schema migrations (v1 → v2) and JSON backup/restore.
-- Full automated test suite (Vitest + React Testing Library) with 27 unit & integration tests.
-- Accessible form controls, WCAG AA compliance, and mobile responsive drawer navigation.
-
-### ⏳ Version 2.1 (Short-Term Enhancements)
-- **iCalendar (.ics) Export:** Export generated study sessions directly into Google Calendar, Apple Calendar, or Outlook.
-- **Active Study Session Mode:** Built-in Pomodoro timer for individual study blocks with audio completion chimes.
-- **Dark / Light Theme Toggle:** Customizable color schemes for daytime study.
+This document outlines the evolutionary milestones for **My Academia Buddy**, tracking completed features, the current Adaptive Academic Coaching Platform implementation, and the architectural plan for future phases.
 
 ---
 
-## 2. Version 3.0: Cloud Architecture & Supabase Strategy
+## 1. Release Milestones & Phase Progress
 
-### 2.1 Motivation & Requirements
-While local browser storage ensures privacy and simplicity, students benefit greatly from:
-- Multi-device synchronization (e.g. managing assignments on laptop, checking study schedule on mobile).
-- Secure authentication (Google OAuth, student email login).
-- Automated cloud backups without requiring manual JSON file exports.
+### ✅ Phase 1: Adaptive Academic Coaching Platform (Current Release — Branch `feature/academic-coach`)
+- **Student Onboarding & Dynamic Profile:**
+  - Non-judgmental 3-step onboarding flow.
+  - Profile tracking program, semester, organization approach, work commitments, study goal hours, and academic goals.
+  - Dynamic inspection of observed adaptive signals (completion consistency, pace multiplier, observed weekly hours).
+- **Course & Syllabus Management:**
+  - Interactive syllabus weekly topics accordion per course.
+  - Multi-state topic tracking (`not_started`, `attended_lecture`, `reading_completed`, `practiced`, `reviewed`).
+  - Self-reported confidence ratings (1 to 5 stars).
+  - Manual syllabus topic creation and structured text syllabus import with mandatory review-and-correct step.
+- **Weekly Academic Check-Ins (Core Feature):**
+  - Personalized 2-minute check-in generating course- and topic-specific questions.
+  - Supports nuanced responses (`completed`, `partially_completed`, `not_started`, `skipped`, `unsure`).
+  - Non-repetitive questions for mastered topics.
+  - Automatic schedule recalibration and pace buffer adjustment.
+- **Observable Course Readiness Indicators:**
+  - Transparent heuristic readiness scoring ($50\%$ topic completion + $25\%$ assignments + $25\%$ confidence).
+  - Categorization into High, Moderate, and Needs Attention tiers with exam urgency alerts.
+  - Prominent disclaimer clarifying readiness is an organizational heuristic, not a scientific passing predictor.
+- **Intelligent Adaptive Study Planner:**
+  - Concrete 3-step micro-actions (`step: 1, action, duration`) replacing vague multi-hour blocks.
+  - Adaptive pace buffer multiplier ($1.0\times - 1.5\times$) adding breathing room to prevent schedule collapse.
+  - Emergency Exam Preparation Mode prioritizing 75% of available study slots for approaching tests.
+  - Syllabus topic-driven study sessions and recovery rescheduling for missed topics.
+- **Personalized Academic Dashboard:**
+  - Actionable "What should I do today?" daily agenda.
+  - Coach Guidance status banner and 2-minute weekly check-in trigger.
+  - Outstanding syllabus topics requiring attention.
+- **Automated QA & Reliability:**
+  - 42 / 42 automated tests passing in Vitest.
+  - Clean ESLint with 0 warnings, 0 errors.
+  - 385ms production build with Vite.
 
-### 2.2 Proposed Technology Stack
-- **Database:** Supabase PostgreSQL
-- **Authentication:** Supabase Auth (JWT, Row Level Security)
-- **Data Access:** Supabase JavaScript Client (`@supabase/supabase-js`)
-- **Offline Sync:** Local-first caching layer (TanStack Query / IndexedDB) with cloud reconciliation.
+---
 
-### 2.3 Proposed Relational Database Schema
+## 2. Deferred Future Phases
 
-```sql
--- 1. Profiles Table (tied to Supabase Auth UUID)
-create table public.profiles (
-  id uuid references auth.users not null primary key,
-  display_name text,
-  university text,
-  created_at timestamptz default now()
-);
+The following features have been intentionally planned and deferred to subsequent phases to prioritize stability, transparency, and product quality in Phase 1:
 
--- 2. Courses Table
-create table public.courses (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null,
-  name text not null,
-  instructor text,
-  schedule text,
-  credits text default '3.0',
-  difficulty text check (difficulty in ('Low', 'Medium', 'High')) default 'Medium',
-  color text default '#3b82f6',
-  created_at timestamptz default now()
-);
+### ⏳ Phase 2: Client-Side PDF Syllabus Extraction (Safe OCR/Parser)
+- **Objective:** Allow students to drop a `.pdf` syllabus directly into the browser to extract weekly topics, reading lists, and assignment deadlines.
+- **Technical Architecture:**
+  - Integrate `pdfjs-dist` client-side (no private student documents sent to third-party AI services).
+  - Regex and layout-based tokenization for syllabus sections (Weeks, Modules, Exams).
+  - Mandatory Review & Correct wizard: The student must verify and edit extracted rows before saving to their course.
 
--- 3. Assignments Table
-create table public.assignments (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null,
-  course_id uuid references public.courses(id) on delete set null,
-  title text not null,
-  due_date date not null,
-  priority text check (priority in ('Low', 'Medium', 'High')) default 'Medium',
-  estimated_workload numeric(4, 1) default 3.0,
-  completed boolean default false,
-  created_at timestamptz default now()
-);
+### ⏳ Phase 3: Cloud Synchronization & Supabase Backend
+- **Objective:** Enable multi-device synchronization (laptop study planning, mobile agenda review).
+- **Technical Architecture:**
+  - Supabase Auth (Passwordless Email Magic Links or Google OAuth).
+  - PostgreSQL schema matching Storage v3 with Row-Level Security (RLS) policies.
+  - Local-first cache with offline synchronization.
+  - Account deletion and complete GDPR data export tools.
 
--- 4. Exams Table
-create table public.exams (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null,
-  course_id uuid references public.courses(id) on delete set null,
-  title text not null,
-  exam_date date not null,
-  location text,
-  notes text,
-  priority text check (priority in ('Low', 'Medium', 'High')) default 'High',
-  estimated_workload numeric(4, 1) default 6.0,
-  created_at timestamptz default now()
-);
+### ⏳ Phase 4: Installable Progressive Web App (PWA)
+- **Objective:** Provide an installable, full-screen native feel on macOS, Windows, iOS, and Android without app store distribution barriers.
+- **Technical Architecture:**
+  - `vite-plugin-pwa` with web app manifest and custom app icons.
+  - Service worker offline cache strategy for static assets.
+  - Background sync queue for check-in responses when offline.
 
--- 5. Weekly Availability Table
-create table public.availability_slots (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null,
-  day text not null,
-  start_time text not null,
-  end_time text not null
-);
+### ⏳ Phase 5: Scheduled Reminders & Email Backend
+- **Objective:** Send scheduled weekly check-in reminders and exam alerts even when the browser is closed.
+- **Technical Architecture:**
+  - Supabase Edge Function triggered via `pg_cron` daily at midnight.
+  - Resend or SendGrid email API with authenticating deep links (`/check-in?token=...`).
+  - User controls for notification frequency, quiet hours, and opt-out preferences.
 
--- 6. Generated Study Plan Table
-create table public.study_sessions (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null,
-  task_id text,
-  session_date date not null,
-  start_time text not null,
-  end_time text not null,
-  type text not null,
-  title text not null,
-  course text,
-  completed boolean default false,
-  recommendation text,
-  explanation jsonb
-);
-```
-
-### 2.4 Row Level Security (RLS) Policies
-Every table enforces user-level isolation:
-```sql
-alter table public.courses enable row level security;
-
-create policy "Users can only access their own courses"
-  on public.courses for all
-  using (auth.uid() = user_id);
-```
-
-### 2.5 Migration Plan from LocalStorage to Cloud
-1. **Zero-Friction Guest Mode:** Continue supporting offline local storage for users without an account.
-2. **Onboarding Cloud Sync Prompt:** Upon registering or logging in, detect existing localStorage data.
-3. **One-Click Cloud Ingestion:** Automatically upsert existing courses, assignments, and exams into the user's Supabase account.
-4. **Offline Resilience:** If connection is lost, mutations queue locally and sync once network connectivity restores.
+### ⏳ Phase 6: Native Mobile App (React Native / Expo)
+- **Objective:** Dedicated mobile companion app for on-the-go check-ins and agenda tracking.
+- **Technical Architecture:**
+  - Monorepo structure with `@academia/core` containing shared scheduling and coaching logic (`scheduler.js`, `coach.js`, `storage.js`).
+  - Expo / React Native mobile UI consuming the shared domain engine.
