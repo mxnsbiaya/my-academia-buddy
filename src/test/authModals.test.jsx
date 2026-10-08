@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../services/supabase', () => ({
+  isConfigured: false,
+  isSupabaseConfigured: () => false,
+  getSupabase: () => null,
+}));
 import { render, screen, fireEvent } from '@testing-library/react';
 import { AuthModal } from '../components/AuthModal';
 import { MigrationModal } from '../components/MigrationModal';
