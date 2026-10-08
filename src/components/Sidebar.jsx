@@ -1,7 +1,9 @@
 import { NavLink } from 'react-router-dom';
 import { useApp } from '../context/useApp';
+import { useAuth } from '../context/useAuth';
 
 export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
+  const { user } = useAuth();
   const {
     courses,
     assignments,
@@ -11,6 +13,8 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
     checkIns = [],
     openCheckInModal,
     openProfileModal,
+    openAuthModal,
+    syncStatus,
   } = useApp();
 
   const pendingAssignmentsCount = assignments.filter((a) => !a.completed).length;
@@ -138,6 +142,18 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
             <span>Data & Backup</span>
           </button>
 
+          <button
+            type="button"
+            className="sidebar-action-btn sidebar-account-trigger"
+            onClick={() => {
+              if (onClose) onClose();
+              openAuthModal();
+            }}
+          >
+            <span aria-hidden="true">{user ? '🎓' : '🔑'}</span>
+            <span>{user ? 'Account & Cloud' : 'Sign In / Sync'}</span>
+          </button>
+
           <div
             className="sidebar-user-pill clickable-pill"
             onClick={() => {
@@ -146,15 +162,13 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
             }}
             title="Click to view student profile"
           >
-            <div className="status-indicator" />
+            <div className={`status-indicator ${syncStatus === 'synced' ? 'status-synced' : syncStatus === 'syncing' ? 'status-syncing' : ''}`} />
             <div className="user-info">
               <span className="user-name">
-                {studentProfile?.name || 'Local Student'}
+                {user ? (user.user_metadata?.full_name || user.email) : (studentProfile?.name || 'Local Student')}
               </span>
               <span className="user-status">
-                {studentProfile?.program
-                  ? `${studentProfile.program} • ${studentProfile.semester || 'S1'}`
-                  : 'Private & Offline'}
+                {user ? 'Cloud Synced' : (studentProfile?.program ? `${studentProfile.program} • ${studentProfile.semester || 'S1'}` : 'Private & Offline')}
               </span>
             </div>
           </div>

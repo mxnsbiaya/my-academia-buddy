@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
-  safeGetItem,
-  safeSetItem,
+  safeGetScopedItem,
+  safeSetScopedItem,
   migrateStorage,
   exportAllData,
   importAllData,
@@ -10,6 +10,7 @@ import {
   getDefaultStudentProfile,
   getDefaultAdaptiveSignals,
   generateDefaultTopicsForCourse,
+  ensureEntityMetadata,
   STORAGE_KEYS,
 } from '../services/storage';
 import { generateStudyPlan } from '../services/scheduler';
@@ -17,6 +18,15 @@ import {
   recalibrateAdaptiveSignals,
   identifyMissedTopicsForRescheduling,
 } from '../services/coach';
+import {
+  enqueueMutation,
+  pullCloudData,
+  flushPendingQueue,
+  subscribeSyncStatus,
+  SYNC_STATUS,
+} from '../services/syncService';
+import { shouldPromptMigration } from '../services/migrationService';
+import { useAuth } from './useAuth';
 import { AppContext } from './AppContextDefinition';
 
 const IMPORT_PRESET_COLORS = [
@@ -34,33 +44,49 @@ export function AppProvider({ children }) {
     migrateStorage();
   }, []);
 
-  const [courses, setCourses] = useState(() => safeGetItem(STORAGE_KEYS.COURSES, []));
-  const [assignments, setAssignments] = useState(() => safeGetItem(STORAGE_KEYS.ASSIGNMENTS, []));
-  const [exams, setExams] = useState(() => safeGetItem(STORAGE_KEYS.EXAMS, []));
-  const [availability, setAvailability] = useState(() => safeGetItem(STORAGE_KEYS.AVAILABILITY, []));
-  const [studyPlan, setStudyPlan] = useState(() => safeGetItem(STORAGE_KEYS.STUDY_PLAN, []));
-  const [insights, setInsights] = useState(() => safeGetItem(STORAGE_KEYS.STUDY_INSIGHTS, null));
+  const { user } = useAuth();
+  const userId = user?.id || null;
+
+  const [courses, setCourses] = useState(() => safeGetScopedItem(STORAGE_KEYS.COURSES, [], userId));
+  const [assignments, setAssignments] = useState(() => safeGetScopedItem(STORAGE_KEYS.ASSIGNMENTS, [], userId));
+  const [exams, setExams] = useState(() => safeGetScopedItem(STORAGE_KEYS.EXAMS, [], userId));
+  const [availability, setAvailability] = useState(() => safeGetScopedItem(STORAGE_KEYS.AVAILABILITY, [], userId));
+  const [studyPlan, setStudyPlan] = useState(() => safeGetScopedItem(STORAGE_KEYS.STUDY_PLAN, [], userId));
+  const [insights, setInsights] = useState(() => safeGetScopedItem(STORAGE_KEYS.STUDY_INSIGHTS, null, userId));
 
   // Academic Coach State
   const [studentProfile, setStudentProfile] = useState(() =>
-    safeGetItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile())
+    safeGetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile(), userId)
   );
   const [syllabusTopics, setSyllabusTopics] = useState(() =>
-    safeGetItem(STORAGE_KEYS.SYLLABUS_TOPICS, [])
+    safeGetScopedItem(STORAGE_KEYS.SYLLABUS_TOPICS, [], userId)
   );
-  const [checkIns, setCheckIns] = useState(() => safeGetItem(STORAGE_KEYS.CHECK_INS, []));
+  const [checkIns, setCheckIns] = useState(() => safeGetScopedItem(STORAGE_KEYS.CHECK_INS, [], userId));
   const [adaptiveSignals, setAdaptiveSignals] = useState(() =>
-    safeGetItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals())
+    safeGetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals(), userId)
   );
   const [emergencyExamMode, setEmergencyExamMode] = useState(false);
 
-  // Coach Modal states
+  // Sync status
+  const [syncStatus, setSyncStatus] = useState(userId ? SYNC_STATUS.SYNCED : SYNC_STATUS.LOCAL_ONLY);
+  const [syncConflict, setSyncConflict] = useState(null);
+
+  useEffect(() => {
+    return subscribeSyncStatus((status, conflict) => {
+      setSyncStatus(status);
+      setSyncConflict(conflict);
+    });
+  }, []);
+
+  // Modal states
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(() => {
-    const profile = safeGetItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile());
+    const profile = safeGetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile(), userId);
     return profile?.onboardingCompleted === false;
   });
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isMigrationModalOpen, setIsMigrationModalOpen] = useState(false);
 
   const openCheckInModal = useCallback(() => setIsCheckInModalOpen(true), []);
   const closeCheckInModal = useCallback(() => setIsCheckInModalOpen(false), []);
@@ -68,6 +94,10 @@ export function AppProvider({ children }) {
   const closeProfileModal = useCallback(() => setIsProfileModalOpen(false), []);
   const openOnboardingModal = useCallback(() => setIsOnboardingModalOpen(true), []);
   const closeOnboardingModal = useCallback(() => setIsOnboardingModalOpen(false), []);
+  const openAuthModal = useCallback(() => setIsAuthModalOpen(true), []);
+  const closeAuthModal = useCallback(() => setIsAuthModalOpen(false), []);
+  const openMigrationModal = useCallback(() => setIsMigrationModalOpen(true), []);
+  const closeMigrationModal = useCallback(() => setIsMigrationModalOpen(false), []);
 
   // Non-blocking in-app notification toasts
   const [toasts, setToasts] = useState([]);
@@ -86,65 +116,123 @@ export function AppProvider({ children }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Sync state changes to localStorage
-  useEffect(() => {
-    safeSetItem(STORAGE_KEYS.COURSES, courses);
-  }, [courses]);
+  // User account switching / state reload & cloud synchronization
+  const prevUserIdRef = useRef(userId);
 
   useEffect(() => {
-    safeSetItem(STORAGE_KEYS.ASSIGNMENTS, assignments);
-  }, [assignments]);
+    if (prevUserIdRef.current === userId) return;
+    prevUserIdRef.current = userId;
+
+    Promise.resolve().then(() => {
+      // Load active user's scoped local storage
+      setCourses(safeGetScopedItem(STORAGE_KEYS.COURSES, [], userId));
+      setAssignments(safeGetScopedItem(STORAGE_KEYS.ASSIGNMENTS, [], userId));
+      setExams(safeGetScopedItem(STORAGE_KEYS.EXAMS, [], userId));
+      setAvailability(safeGetScopedItem(STORAGE_KEYS.AVAILABILITY, [], userId));
+      setStudyPlan(safeGetScopedItem(STORAGE_KEYS.STUDY_PLAN, [], userId));
+      setInsights(safeGetScopedItem(STORAGE_KEYS.STUDY_INSIGHTS, null, userId));
+      setStudentProfile(safeGetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile(), userId));
+      setSyllabusTopics(safeGetScopedItem(STORAGE_KEYS.SYLLABUS_TOPICS, [], userId));
+      setCheckIns(safeGetScopedItem(STORAGE_KEYS.CHECK_INS, [], userId));
+      setAdaptiveSignals(safeGetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals(), userId));
+
+      if (userId) {
+        // Detect if migration is needed
+        if (shouldPromptMigration(userId)) {
+          setIsMigrationModalOpen(true);
+        }
+
+        // Pull cloud data
+        pullCloudData(userId).then((cloudData) => {
+          if (cloudData) {
+            if (cloudData.courses?.length > 0) setCourses(cloudData.courses);
+            if (cloudData.syllabusTopics?.length > 0) setSyllabusTopics(cloudData.syllabusTopics);
+            if (cloudData.assignments?.length > 0) setAssignments(cloudData.assignments);
+            if (cloudData.exams?.length > 0) setExams(cloudData.exams);
+            if (cloudData.availability?.length > 0) setAvailability(cloudData.availability);
+            if (cloudData.checkIns?.length > 0) setCheckIns(cloudData.checkIns);
+            if (cloudData.adaptiveSignals) setAdaptiveSignals(cloudData.adaptiveSignals);
+            if (cloudData.studentProfile) setStudentProfile(cloudData.studentProfile);
+            if (cloudData.studyPlan?.length > 0) setStudyPlan(cloudData.studyPlan);
+            if (cloudData.studyInsights) setInsights(cloudData.studyInsights);
+          }
+        });
+
+        // Flush pending queue
+        flushPendingQueue(userId);
+      }
+    });
+  }, [userId]);
+
+  // Sync state changes to scoped localStorage
+  useEffect(() => {
+    safeSetScopedItem(STORAGE_KEYS.COURSES, courses, userId);
+  }, [courses, userId]);
 
   useEffect(() => {
-    safeSetItem(STORAGE_KEYS.EXAMS, exams);
-  }, [exams]);
+    safeSetScopedItem(STORAGE_KEYS.ASSIGNMENTS, assignments, userId);
+  }, [assignments, userId]);
 
   useEffect(() => {
-    safeSetItem(STORAGE_KEYS.AVAILABILITY, availability);
-  }, [availability]);
+    safeSetScopedItem(STORAGE_KEYS.EXAMS, exams, userId);
+  }, [exams, userId]);
 
   useEffect(() => {
-    safeSetItem(STORAGE_KEYS.STUDY_PLAN, studyPlan);
-  }, [studyPlan]);
+    safeSetScopedItem(STORAGE_KEYS.AVAILABILITY, availability, userId);
+  }, [availability, userId]);
+
+  useEffect(() => {
+    safeSetScopedItem(STORAGE_KEYS.STUDY_PLAN, studyPlan, userId);
+  }, [studyPlan, userId]);
 
   useEffect(() => {
     if (insights) {
-      safeSetItem(STORAGE_KEYS.STUDY_INSIGHTS, insights);
+      safeSetScopedItem(STORAGE_KEYS.STUDY_INSIGHTS, insights, userId);
     }
-  }, [insights]);
+  }, [insights, userId]);
 
   useEffect(() => {
-    safeSetItem(STORAGE_KEYS.STUDENT_PROFILE, studentProfile);
-  }, [studentProfile]);
+    safeSetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, studentProfile, userId);
+  }, [studentProfile, userId]);
 
   useEffect(() => {
-    safeSetItem(STORAGE_KEYS.SYLLABUS_TOPICS, syllabusTopics);
-  }, [syllabusTopics]);
+    safeSetScopedItem(STORAGE_KEYS.SYLLABUS_TOPICS, syllabusTopics, userId);
+  }, [syllabusTopics, userId]);
 
   useEffect(() => {
-    safeSetItem(STORAGE_KEYS.CHECK_INS, checkIns);
-  }, [checkIns]);
+    safeSetScopedItem(STORAGE_KEYS.CHECK_INS, checkIns, userId);
+  }, [checkIns, userId]);
 
   useEffect(() => {
-    safeSetItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, adaptiveSignals);
-  }, [adaptiveSignals]);
+    safeSetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, adaptiveSignals, userId);
+  }, [adaptiveSignals, userId]);
 
   // --- Student Profile Operations ---
   const updateStudentProfile = useCallback(
     (profileUpdates) => {
       setStudentProfile((prev) => {
-        const next = { ...prev, ...profileUpdates, lastUpdated: new Date().toISOString() };
+        const next = ensureEntityMetadata({
+          ...prev,
+          ...profileUpdates,
+          lastUpdated: new Date().toISOString(),
+        });
+        enqueueMutation(userId, {
+          entity: 'studentProfile',
+          action: 'upsert',
+          clientId: userId || 'profile',
+          data: next,
+        });
         return next;
       });
       addToast('Academic profile updated successfully.', 'success');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   // --- Course Operations ---
   const addCourse = useCallback(
     (courseData) => {
-      const newCourse = {
+      const newCourse = ensureEntityMetadata({
         id: Date.now(),
         name: courseData.name.trim(),
         instructor: courseData.instructor?.trim() || '',
@@ -153,33 +241,85 @@ export function AppProvider({ children }) {
         difficulty: courseData.difficulty || 'Medium',
         color: courseData.color || '#3b82f6',
         createdAt: new Date().toISOString(),
-      };
+      });
       setCourses((prev) => [...prev, newCourse]);
+      enqueueMutation(userId, {
+        entity: 'courses',
+        action: 'upsert',
+        clientId: newCourse.id,
+        data: newCourse,
+      });
 
       // Automatically generate starter syllabus topics for the new course
-      const initialTopics = generateDefaultTopicsForCourse(newCourse);
+      const initialTopics = generateDefaultTopicsForCourse(newCourse).map(ensureEntityMetadata);
       setSyllabusTopics((prev) => [...prev, ...initialTopics]);
+      initialTopics.forEach((t) => {
+        enqueueMutation(userId, {
+          entity: 'syllabusTopics',
+          action: 'upsert',
+          clientId: t.id,
+          data: t,
+        });
+      });
 
       addToast(`Course "${newCourse.name}" registered with starter syllabus topics.`, 'success');
       return newCourse;
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const updateCourse = useCallback(
     (id, updatedData) => {
+      let updatedCourseObj = null;
       setCourses((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, ...updatedData, name: updatedData.name.trim() } : c))
+        prev.map((c) => {
+          if (c.id === id) {
+            updatedCourseObj = ensureEntityMetadata({
+              ...c,
+              ...updatedData,
+              name: updatedData.name ? updatedData.name.trim() : c.name,
+              version: (c.version || 1) + 1,
+            });
+            return updatedCourseObj;
+          }
+          return c;
+        })
       );
+
+      if (updatedCourseObj) {
+        enqueueMutation(userId, {
+          entity: 'courses',
+          action: 'upsert',
+          clientId: id,
+          data: updatedCourseObj,
+        });
+      }
+
       // Synchronize courseName on linked topics
       if (updatedData.name) {
         setSyllabusTopics((prev) =>
-          prev.map((t) => (t.courseId === id ? { ...t, courseName: updatedData.name.trim() } : t))
+          prev.map((t) => {
+            if (t.courseId === id) {
+              const updatedTopic = ensureEntityMetadata({
+                ...t,
+                courseName: updatedData.name.trim(),
+                version: (t.version || 1) + 1,
+              });
+              enqueueMutation(userId, {
+                entity: 'syllabusTopics',
+                action: 'upsert',
+                clientId: t.id,
+                data: updatedTopic,
+              });
+              return updatedTopic;
+            }
+            return t;
+          })
         );
       }
       addToast('Course details updated.', 'success');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const deleteCourse = useCallback(
@@ -187,15 +327,22 @@ export function AppProvider({ children }) {
       const courseToDelete = courses.find((c) => c.id === id);
       setCourses((prev) => prev.filter((c) => c.id !== id));
       setSyllabusTopics((prev) => prev.filter((t) => t.courseId !== id));
+
+      enqueueMutation(userId, {
+        entity: 'courses',
+        action: 'delete',
+        clientId: id,
+      });
+
       addToast(`Course "${courseToDelete?.name || ''}" removed.`, 'info');
     },
-    [courses, addToast]
+    [courses, userId, addToast]
   );
 
   // --- Syllabus Topic Operations ---
   const addTopic = useCallback(
     (topicData) => {
-      const newTopic = {
+      const newTopic = ensureEntityMetadata({
         id: `topic-${Date.now()}`,
         courseId: topicData.courseId,
         courseName: topicData.courseName,
@@ -209,66 +356,117 @@ export function AppProvider({ children }) {
         status: topicData.status || 'not_started',
         confidence: Number(topicData.confidence) || 3,
         lastUpdated: new Date().toISOString(),
-      };
+      });
       setSyllabusTopics((prev) => [...prev, newTopic]);
+      enqueueMutation(userId, {
+        entity: 'syllabusTopics',
+        action: 'upsert',
+        clientId: newTopic.id,
+        data: newTopic,
+      });
+
       addToast(`Added topic: "${newTopic.title}" to ${newTopic.courseName}`, 'success');
       return newTopic;
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const updateTopic = useCallback(
     (id, updatedData) => {
+      let updatedObj = null;
       setSyllabusTopics((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, ...updatedData, lastUpdated: new Date().toISOString() } : t))
+        prev.map((t) => {
+          if (t.id === id) {
+            updatedObj = ensureEntityMetadata({
+              ...t,
+              ...updatedData,
+              lastUpdated: new Date().toISOString(),
+              version: (t.version || 1) + 1,
+            });
+            return updatedObj;
+          }
+          return t;
+        })
       );
+
+      if (updatedObj) {
+        enqueueMutation(userId, {
+          entity: 'syllabusTopics',
+          action: 'upsert',
+          clientId: id,
+          data: updatedObj,
+        });
+      }
       addToast('Syllabus topic updated.', 'success');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const deleteTopic = useCallback(
     (id) => {
       setSyllabusTopics((prev) => prev.filter((t) => t.id !== id));
+      enqueueMutation(userId, {
+        entity: 'syllabusTopics',
+        action: 'delete',
+        clientId: id,
+      });
       addToast('Topic removed from syllabus.', 'info');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const updateTopicProgress = useCallback(
     (id, { status, confidence }) => {
+      let updatedObj = null;
       setSyllabusTopics((prev) =>
         prev.map((t) => {
           if (t.id === id) {
-            return {
+            updatedObj = ensureEntityMetadata({
               ...t,
               status: status !== undefined ? status : t.status,
               confidence: confidence !== undefined ? confidence : t.confidence,
               lastUpdated: new Date().toISOString(),
-            };
+              version: (t.version || 1) + 1,
+            });
+            return updatedObj;
           }
           return t;
         })
       );
+
+      if (updatedObj) {
+        enqueueMutation(userId, {
+          entity: 'syllabusTopics',
+          action: 'upsert',
+          clientId: id,
+          data: updatedObj,
+        });
+      }
     },
-    []
+    [userId]
   );
 
   // --- Weekly Check-In Submission ---
   const submitCheckIn = useCallback(
     ({ responses, newCommitments }) => {
-      const newCheckIn = {
+      const newCheckIn = ensureEntityMetadata({
         id: `checkin-${Date.now()}`,
         weekNumber: checkIns.length + 1,
         date: new Date().toISOString(),
         responses,
         newCommitmentsNoted: newCommitments || '',
         completedAt: new Date().toISOString(),
-      };
+      });
 
       // 1. Save check-in
       const updatedCheckIns = [newCheckIn, ...checkIns];
       setCheckIns(updatedCheckIns);
+      enqueueMutation(userId, {
+        entity: 'checkIns',
+        action: 'upsert',
+        clientId: newCheckIn.id,
+        data: newCheckIn,
+      });
 
       // 2. Update topic progress based on check-in answers
       let updatedTopics = syllabusTopics;
@@ -285,7 +483,20 @@ export function AppProvider({ children }) {
               nextStatus = 'practiced';
             }
             const nextConf = resp.confidenceScore ? Number(resp.confidenceScore) : t.confidence;
-            return { ...t, status: nextStatus, confidence: nextConf, lastUpdated: new Date().toISOString() };
+            const updatedTopic = ensureEntityMetadata({
+              ...t,
+              status: nextStatus,
+              confidence: nextConf,
+              lastUpdated: new Date().toISOString(),
+              version: (t.version || 1) + 1,
+            });
+            enqueueMutation(userId, {
+              entity: 'syllabusTopics',
+              action: 'upsert',
+              clientId: t.id,
+              data: updatedTopic,
+            });
+            return updatedTopic;
           }
           return t;
         });
@@ -293,8 +504,16 @@ export function AppProvider({ children }) {
       }
 
       // 3. Recalibrate adaptive pacing signals
-      const nextSignals = recalibrateAdaptiveSignals(updatedCheckIns, studyPlan, adaptiveSignals);
+      const nextSignals = ensureEntityMetadata(
+        recalibrateAdaptiveSignals(updatedCheckIns, studyPlan, adaptiveSignals)
+      );
       setAdaptiveSignals(nextSignals);
+      enqueueMutation(userId, {
+        entity: 'adaptiveSignals',
+        action: 'upsert',
+        clientId: userId || 'signals',
+        data: nextSignals,
+      });
 
       // 4. Automatically adapt study plan if plan exists
       if (studyPlan && studyPlan.length > 0) {
@@ -315,53 +534,113 @@ export function AppProvider({ children }) {
         });
 
         if (result && result.plan) {
-          setStudyPlan(result.plan);
-          if (result.insights) setInsights(result.insights);
+          const mappedPlan = result.plan.map(ensureEntityMetadata);
+          setStudyPlan(mappedPlan);
+          mappedPlan.forEach((s) => {
+            enqueueMutation(userId, {
+              entity: 'studyPlan',
+              action: 'upsert',
+              clientId: s.id,
+              data: s,
+            });
+          });
+          if (result.insights) {
+            setInsights(result.insights);
+            enqueueMutation(userId, {
+              entity: 'studyInsights',
+              action: 'upsert',
+              clientId: userId || 'insights',
+              data: result.insights,
+            });
+          }
         }
       }
 
       addToast('Weekly check-in complete! Your adaptive study plan was recalibrated.', 'success', 5000);
       return newCheckIn;
     },
-    [checkIns, studyPlan, adaptiveSignals, addToast, syllabusTopics, courses, assignments, exams, availability, emergencyExamMode]
+    [
+      checkIns,
+      studyPlan,
+      adaptiveSignals,
+      syllabusTopics,
+      courses,
+      assignments,
+      exams,
+      availability,
+      emergencyExamMode,
+      userId,
+      addToast,
+    ]
   );
 
   // --- Assignment Operations ---
   const addAssignment = useCallback(
     (data) => {
-      const newAssignment = {
+      const newAssignment = ensureEntityMetadata({
         id: Date.now(),
         title: data.title.trim(),
         course: data.course?.trim() || '',
         dueDate: data.dueDate,
         priority: data.priority || 'Medium',
         estimatedWorkload: Number(data.estimatedWorkload) || 3,
+        weightPercent: data.weightPercent || null,
         completed: false,
         createdAt: new Date().toISOString(),
-      };
+      });
       setAssignments((prev) => [...prev, newAssignment]);
+      enqueueMutation(userId, {
+        entity: 'assignments',
+        action: 'upsert',
+        clientId: newAssignment.id,
+        data: newAssignment,
+      });
       addToast(`Assignment "${newAssignment.title}" created.`, 'success');
       return newAssignment;
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const updateAssignment = useCallback(
     (id, updatedData) => {
+      let updatedObj = null;
       setAssignments((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, ...updatedData } : a))
+        prev.map((a) => {
+          if (a.id === id) {
+            updatedObj = ensureEntityMetadata({
+              ...a,
+              ...updatedData,
+              version: (a.version || 1) + 1,
+            });
+            return updatedObj;
+          }
+          return a;
+        })
       );
+      if (updatedObj) {
+        enqueueMutation(userId, {
+          entity: 'assignments',
+          action: 'upsert',
+          clientId: id,
+          data: updatedObj,
+        });
+      }
       addToast('Assignment updated.', 'success');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const deleteAssignment = useCallback(
     (id) => {
       setAssignments((prev) => prev.filter((a) => a.id !== id));
+      enqueueMutation(userId, {
+        entity: 'assignments',
+        action: 'delete',
+        clientId: id,
+      });
       addToast('Assignment removed.', 'info');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const toggleAssignmentCompleted = useCallback(
@@ -370,20 +649,31 @@ export function AppProvider({ children }) {
         prev.map((a) => {
           if (a.id === id) {
             const nextState = !a.completed;
+            const updated = ensureEntityMetadata({
+              ...a,
+              completed: nextState,
+              version: (a.version || 1) + 1,
+            });
+            enqueueMutation(userId, {
+              entity: 'assignments',
+              action: 'upsert',
+              clientId: id,
+              data: updated,
+            });
             addToast(nextState ? `Marked "${a.title}" as completed!` : `Reopened "${a.title}".`, 'info');
-            return { ...a, completed: nextState };
+            return updated;
           }
           return a;
         })
       );
     },
-    [addToast]
+    [userId, addToast]
   );
 
   // --- Exam Operations ---
   const addExam = useCallback(
     (data) => {
-      const newExam = {
+      const newExam = ensureEntityMetadata({
         id: Date.now(),
         title: data.title?.trim() || `${data.course} Exam`,
         course: data.course?.trim() || '',
@@ -392,56 +682,98 @@ export function AppProvider({ children }) {
         notes: data.notes?.trim() || '',
         priority: data.priority || 'High',
         estimatedWorkload: Number(data.estimatedWorkload) || 5,
+        weightPercent: data.weightPercent || null,
         createdAt: new Date().toISOString(),
-      };
+      });
       setExams((prev) => [...prev, newExam]);
+      enqueueMutation(userId, {
+        entity: 'exams',
+        action: 'upsert',
+        clientId: newExam.id,
+        data: newExam,
+      });
       addToast(`Exam "${newExam.title}" scheduled.`, 'success');
       return newExam;
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const updateExam = useCallback(
     (id, updatedData) => {
+      let updatedObj = null;
       setExams((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, ...updatedData } : e))
+        prev.map((e) => {
+          if (e.id === id) {
+            updatedObj = ensureEntityMetadata({
+              ...e,
+              ...updatedData,
+              version: (e.version || 1) + 1,
+            });
+            return updatedObj;
+          }
+          return e;
+        })
       );
+      if (updatedObj) {
+        enqueueMutation(userId, {
+          entity: 'exams',
+          action: 'upsert',
+          clientId: id,
+          data: updatedObj,
+        });
+      }
       addToast('Exam details updated.', 'success');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const deleteExam = useCallback(
     (id) => {
       setExams((prev) => prev.filter((e) => e.id !== id));
+      enqueueMutation(userId, {
+        entity: 'exams',
+        action: 'delete',
+        clientId: id,
+      });
       addToast('Exam removed.', 'info');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   // --- Availability Operations ---
   const addAvailability = useCallback(
     (slotData) => {
-      const newSlot = {
+      const newSlot = ensureEntityMetadata({
         id: Date.now(),
         day: slotData.day,
         startTime: slotData.startTime,
         endTime: slotData.endTime,
         warning: slotData.warning || '',
-      };
+      });
       setAvailability((prev) => [...prev, newSlot]);
+      enqueueMutation(userId, {
+        entity: 'availability',
+        action: 'upsert',
+        clientId: newSlot.id,
+        data: newSlot,
+      });
       addToast(`Added availability for ${newSlot.day}.`, 'success');
       return newSlot;
     },
-    [addToast]
+    [userId, addToast]
   );
 
   const deleteAvailability = useCallback(
     (id) => {
       setAvailability((prev) => prev.filter((slot) => slot.id !== id));
+      enqueueMutation(userId, {
+        entity: 'availability',
+        action: 'delete',
+        clientId: id,
+      });
       addToast('Availability window deleted.', 'info');
     },
-    [addToast]
+    [userId, addToast]
   );
 
   // --- Smart Study Planner Operations ---
@@ -468,8 +800,28 @@ export function AppProvider({ children }) {
         return { success: false, errors: result.errors };
       }
 
-      setStudyPlan(result.plan);
+      const planWithMeta = (result.plan || []).map(ensureEntityMetadata);
+      setStudyPlan(planWithMeta);
       setInsights(result.insights);
+
+      if (userId) {
+        planWithMeta.forEach((s) => {
+          enqueueMutation(userId, {
+            entity: 'studyPlan',
+            action: 'upsert',
+            clientId: s.id,
+            data: s,
+          });
+        });
+        if (result.insights) {
+          enqueueMutation(userId, {
+            entity: 'studyInsights',
+            action: 'upsert',
+            clientId: userId,
+            data: result.insights,
+          });
+        }
+      }
 
       if (emergencyExamMode) {
         addToast('⚡ Emergency Exam Prep plan generated with intensive mock review blocks!', 'warning', 7000);
@@ -483,22 +835,61 @@ export function AppProvider({ children }) {
         addToast('Adaptive study plan generated with concrete action steps!', 'success');
       }
 
-      return { success: true, plan: result.plan, insights: result.insights };
+      return { success: true, plan: planWithMeta, insights: result.insights };
     },
-    [courses, assignments, exams, availability, syllabusTopics, studyPlan, checkIns, adaptiveSignals, emergencyExamMode, addToast]
+    [
+      courses,
+      assignments,
+      exams,
+      availability,
+      syllabusTopics,
+      studyPlan,
+      checkIns,
+      adaptiveSignals,
+      emergencyExamMode,
+      userId,
+      addToast,
+    ]
   );
 
-  const toggleSessionCompleted = useCallback((sessionId) => {
-    setStudyPlan((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, completed: !s.completed } : s))
-    );
-  }, []);
+  const toggleSessionCompleted = useCallback(
+    (sessionId) => {
+      setStudyPlan((prev) =>
+        prev.map((s) => {
+          if (s.id === sessionId) {
+            const nextCompleted = !s.completed;
+            const updated = ensureEntityMetadata({
+              ...s,
+              completed: nextCompleted,
+              version: (s.version || 1) + 1,
+            });
+            enqueueMutation(userId, {
+              entity: 'studyPlan',
+              action: 'upsert',
+              clientId: sessionId,
+              data: updated,
+            });
+            return updated;
+          }
+          return s;
+        })
+      );
+    },
+    [userId]
+  );
 
   const clearPlan = useCallback(() => {
+    studyPlan.forEach((s) => {
+      enqueueMutation(userId, {
+        entity: 'studyPlan',
+        action: 'delete',
+        clientId: s.id,
+      });
+    });
     setStudyPlan([]);
     setInsights(null);
     addToast('Study plan cleared.', 'info');
-  }, [addToast]);
+  }, [studyPlan, userId, addToast]);
 
   const toggleEmergencyExamMode = useCallback(
     (forcedValue) => {
@@ -531,7 +922,7 @@ export function AppProvider({ children }) {
 
       newCoursesList.forEach((imported, idx) => {
         const courseId = Date.now() + idx + Math.floor(Math.random() * 1000);
-        const courseObj = {
+        const courseObj = ensureEntityMetadata({
           id: courseId,
           name: imported.name || imported.courseCode || `Course ${idx + 1}`,
           instructor: imported.instructor || '',
@@ -541,18 +932,24 @@ export function AppProvider({ children }) {
           color: imported.color || IMPORT_PRESET_COLORS[idx % IMPORT_PRESET_COLORS.length],
           createdAt: new Date().toISOString(),
           gradingScheme: imported.gradingScheme || [],
-        };
+        });
         baseCourses.push(courseObj);
+        enqueueMutation(userId, {
+          entity: 'courses',
+          action: 'upsert',
+          clientId: courseObj.id,
+          data: courseObj,
+        });
         addedCourseCount++;
 
         // Add weekly topics
         if (imported.topics && imported.topics.length > 0) {
           imported.topics.forEach((t, tIdx) => {
-            const topicObj = {
+            const topicObj = ensureEntityMetadata({
               id: `topic-${Date.now()}-${idx}-${tIdx}`,
               courseId: courseId,
               courseName: courseObj.name,
-              weekNumber: Number(t.weekNumber) || (tIdx + 1),
+              weekNumber: Number(t.weekNumber) || tIdx + 1,
               title: t.title?.trim() || `Week ${tIdx + 1} Lecture`,
               description: t.description?.trim() || '',
               requiredReadings: t.requiredReadings?.trim() || '',
@@ -562,8 +959,14 @@ export function AppProvider({ children }) {
               status: 'not_started',
               confidence: 3,
               lastUpdated: new Date().toISOString(),
-            };
+            });
             baseTopics.push(topicObj);
+            enqueueMutation(userId, {
+              entity: 'syllabusTopics',
+              action: 'upsert',
+              clientId: topicObj.id,
+              data: topicObj,
+            });
             addedTopicCount++;
           });
         }
@@ -571,7 +974,7 @@ export function AppProvider({ children }) {
         // Add assignments
         if (imported.assignments && imported.assignments.length > 0) {
           imported.assignments.forEach((a, aIdx) => {
-            const asgObj = {
+            const asgObj = ensureEntityMetadata({
               id: `asg-${Date.now()}-${idx}-${aIdx}`,
               title: a.title?.trim() || `Assignment ${aIdx + 1}`,
               course: courseObj.name,
@@ -581,8 +984,14 @@ export function AppProvider({ children }) {
               weightPercent: a.weightPercent || null,
               completed: false,
               createdAt: new Date().toISOString(),
-            };
+            });
             baseAssignments.push(asgObj);
+            enqueueMutation(userId, {
+              entity: 'assignments',
+              action: 'upsert',
+              clientId: asgObj.id,
+              data: asgObj,
+            });
             addedAssignmentCount++;
           });
         }
@@ -590,7 +999,7 @@ export function AppProvider({ children }) {
         // Add exams
         if (imported.exams && imported.exams.length > 0) {
           imported.exams.forEach((e, eIdx) => {
-            const examObj = {
+            const examObj = ensureEntityMetadata({
               id: `exam-${Date.now()}-${idx}-${eIdx}`,
               title: e.title?.trim() || 'Exam',
               course: courseObj.name,
@@ -601,8 +1010,14 @@ export function AppProvider({ children }) {
               estimatedWorkload: e.estimatedWorkload || 8,
               weightPercent: e.weightPercent || null,
               createdAt: new Date().toISOString(),
-            };
+            });
             baseExams.push(examObj);
+            enqueueMutation(userId, {
+              entity: 'exams',
+              action: 'upsert',
+              clientId: examObj.id,
+              data: examObj,
+            });
             addedExamCount++;
           });
         }
@@ -627,7 +1042,7 @@ export function AppProvider({ children }) {
         addedExamCount,
       };
     },
-    [courses, syllabusTopics, assignments, exams, addToast]
+    [courses, syllabusTopics, assignments, exams, userId, addToast]
   );
 
   // --- Global Backup & Demo Operations ---
@@ -643,7 +1058,6 @@ export function AppProvider({ children }) {
       setCheckIns(data.checkIns);
       setAdaptiveSignals(data.adaptiveSignals);
 
-      // Immediately generate realistic plan for this student
       const missedTopics = identifyMissedTopicsForRescheduling(data.checkIns, data.topics);
       const missedIds = missedTopics.map((t) => t.id);
       const planResult = generateStudyPlan({
@@ -699,16 +1113,16 @@ export function AppProvider({ children }) {
     (jsonString) => {
       const result = importAllData(jsonString);
       if (result.success) {
-        setCourses(safeGetItem(STORAGE_KEYS.COURSES, []));
-        setAssignments(safeGetItem(STORAGE_KEYS.ASSIGNMENTS, []));
-        setExams(safeGetItem(STORAGE_KEYS.EXAMS, []));
-        setAvailability(safeGetItem(STORAGE_KEYS.AVAILABILITY, []));
-        setStudentProfile(safeGetItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile()));
-        setSyllabusTopics(safeGetItem(STORAGE_KEYS.SYLLABUS_TOPICS, []));
-        setCheckIns(safeGetItem(STORAGE_KEYS.CHECK_INS, []));
-        setAdaptiveSignals(safeGetItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals()));
-        setStudyPlan(safeGetItem(STORAGE_KEYS.STUDY_PLAN, []));
-        setInsights(safeGetItem(STORAGE_KEYS.STUDY_INSIGHTS, null));
+        setCourses(safeGetScopedItem(STORAGE_KEYS.COURSES, [], userId));
+        setAssignments(safeGetScopedItem(STORAGE_KEYS.ASSIGNMENTS, [], userId));
+        setExams(safeGetScopedItem(STORAGE_KEYS.EXAMS, [], userId));
+        setAvailability(safeGetScopedItem(STORAGE_KEYS.AVAILABILITY, [], userId));
+        setStudentProfile(safeGetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile(), userId));
+        setSyllabusTopics(safeGetScopedItem(STORAGE_KEYS.SYLLABUS_TOPICS, [], userId));
+        setCheckIns(safeGetScopedItem(STORAGE_KEYS.CHECK_INS, [], userId));
+        setAdaptiveSignals(safeGetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals(), userId));
+        setStudyPlan(safeGetScopedItem(STORAGE_KEYS.STUDY_PLAN, [], userId));
+        setInsights(safeGetScopedItem(STORAGE_KEYS.STUDY_INSIGHTS, null, userId));
         addToast(result.message, 'success');
         return true;
       } else {
@@ -716,7 +1130,28 @@ export function AppProvider({ children }) {
         return false;
       }
     },
-    [addToast]
+    [userId, addToast]
+  );
+
+  const handleMigrationComplete = useCallback(
+    () => {
+      if (userId) {
+        pullCloudData(userId).then((cloudData) => {
+          if (cloudData) {
+            if (cloudData.courses) setCourses(cloudData.courses);
+            if (cloudData.syllabusTopics) setSyllabusTopics(cloudData.syllabusTopics);
+            if (cloudData.assignments) setAssignments(cloudData.assignments);
+            if (cloudData.exams) setExams(cloudData.exams);
+            if (cloudData.availability) setAvailability(cloudData.availability);
+            if (cloudData.checkIns) setCheckIns(cloudData.checkIns);
+            if (cloudData.adaptiveSignals) setAdaptiveSignals(cloudData.adaptiveSignals);
+            if (cloudData.studentProfile) setStudentProfile(cloudData.studentProfile);
+          }
+        });
+      }
+      addToast('Local data migration confirmed and synced to cloud!', 'success', 5000);
+    },
+    [userId, addToast]
   );
 
   const contextValue = useMemo(
@@ -733,6 +1168,9 @@ export function AppProvider({ children }) {
       adaptiveSignals,
       emergencyExamMode,
       toasts,
+      syncStatus,
+      syncConflict,
+      flushSync: () => flushPendingQueue(userId),
       addToast,
       removeToast,
       updateStudentProfile,
@@ -769,6 +1207,13 @@ export function AppProvider({ children }) {
       isOnboardingModalOpen,
       openOnboardingModal,
       closeOnboardingModal,
+      isAuthModalOpen,
+      openAuthModal,
+      closeAuthModal,
+      isMigrationModalOpen,
+      openMigrationModal,
+      closeMigrationModal,
+      handleMigrationComplete,
       exportData: exportAllData,
       importData: handleImportBackup,
       importSemesterFromSyllabi,
@@ -785,6 +1230,10 @@ export function AppProvider({ children }) {
       checkIns,
       adaptiveSignals,
       emergencyExamMode,
+      toasts,
+      syncStatus,
+      syncConflict,
+      userId,
       isCheckInModalOpen,
       openCheckInModal,
       closeCheckInModal,
@@ -794,7 +1243,13 @@ export function AppProvider({ children }) {
       isOnboardingModalOpen,
       openOnboardingModal,
       closeOnboardingModal,
-      toasts,
+      isAuthModalOpen,
+      openAuthModal,
+      closeAuthModal,
+      isMigrationModalOpen,
+      openMigrationModal,
+      closeMigrationModal,
+      handleMigrationComplete,
       addToast,
       removeToast,
       updateStudentProfile,

@@ -71,6 +71,134 @@ export function safeRemoveItem(key) {
 }
 
 /**
+ * Computes an account-isolated storage key
+ * @param {string} key
+ * @param {string|null} userId
+ * @returns {string}
+ */
+export function getScopedStorageKey(key, userId = null) {
+  if (userId) {
+    return `mab_user_${userId}_${key}`;
+  }
+  return `mab_guest_${key}`;
+}
+
+/**
+ * Safely parse JSON from localStorage with account isolation and guest fallback
+ * @template T
+ * @param {string} key
+ * @param {T} fallback
+ * @param {string|null} userId
+ * @returns {T}
+ */
+export function safeGetScopedItem(key, fallback, userId = null) {
+  const scopedKey = getScopedStorageKey(key, userId);
+  const scopedValue = safeGetItem(scopedKey, null);
+  if (scopedValue !== null) {
+    return scopedValue;
+  }
+  // If guest, fall back to legacy un-prefixed key for backwards compatibility
+  if (!userId) {
+    return safeGetItem(key, fallback);
+  }
+  return fallback;
+}
+
+/**
+ * Safely set JSON in localStorage with account scoping
+ * @param {string} key
+ * @param {any} value
+ * @param {string|null} userId
+ * @returns {boolean}
+ */
+export function safeSetScopedItem(key, value, userId = null) {
+  const scopedKey = getScopedStorageKey(key, userId);
+  return safeSetItem(scopedKey, value);
+}
+
+/**
+ * Safely remove an item from account-scoped localStorage
+ * @param {string} key
+ * @param {string|null} userId
+ */
+export function safeRemoveScopedItem(key, userId = null) {
+  const scopedKey = getScopedStorageKey(key, userId);
+  safeRemoveItem(scopedKey);
+  if (!userId) {
+    safeRemoveItem(key);
+  }
+}
+
+/**
+ * Creates an immutable recoverable JSON backup snapshot in localStorage
+ * @param {string} label
+ * @returns {string} The backup key
+ */
+export function createRecoveryBackup(label = 'manual') {
+  const snapshot = exportAllData();
+  const backupKey = `mab_recovery_${label}_${Date.now()}`;
+  safeSetItem(backupKey, {
+    created_at: new Date().toISOString(),
+    label,
+    snapshot: JSON.parse(snapshot),
+  });
+  return backupKey;
+}
+
+/**
+ * Checks whether unauthenticated guest data exists in local storage
+ * @returns {boolean}
+ */
+export function hasGuestData() {
+  const courses = safeGetScopedItem(STORAGE_KEYS.COURSES, [], null);
+  const assignments = safeGetScopedItem(STORAGE_KEYS.ASSIGNMENTS, [], null);
+  const exams = safeGetScopedItem(STORAGE_KEYS.EXAMS, [], null);
+  const topics = safeGetScopedItem(STORAGE_KEYS.SYLLABUS_TOPICS, [], null);
+  const checkIns = safeGetScopedItem(STORAGE_KEYS.CHECK_INS, [], null);
+
+  return (
+    (Array.isArray(courses) && courses.length > 0) ||
+    (Array.isArray(assignments) && assignments.length > 0) ||
+    (Array.isArray(exams) && exams.length > 0) ||
+    (Array.isArray(topics) && topics.length > 0) ||
+    (Array.isArray(checkIns) && checkIns.length > 0)
+  );
+}
+
+/**
+ * Returns a full guest data snapshot for migration
+ * @returns {object}
+ */
+export function getGuestDataSnapshot() {
+  return {
+    courses: safeGetScopedItem(STORAGE_KEYS.COURSES, [], null),
+    assignments: safeGetScopedItem(STORAGE_KEYS.ASSIGNMENTS, [], null),
+    exams: safeGetScopedItem(STORAGE_KEYS.EXAMS, [], null),
+    availability: safeGetScopedItem(STORAGE_KEYS.AVAILABILITY, [], null),
+    studyPlan: safeGetScopedItem(STORAGE_KEYS.STUDY_PLAN, [], null),
+    studyInsights: safeGetScopedItem(STORAGE_KEYS.STUDY_INSIGHTS, null, null),
+    studentProfile: safeGetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile(), null),
+    syllabusTopics: safeGetScopedItem(STORAGE_KEYS.SYLLABUS_TOPICS, [], null),
+    checkIns: safeGetScopedItem(STORAGE_KEYS.CHECK_INS, [], null),
+    adaptiveSignals: safeGetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals(), null),
+  };
+}
+
+/**
+ * Enforces versioning and update timestamps on items
+ * @param {object} item
+ * @returns {object}
+ */
+export function ensureEntityMetadata(item) {
+  if (!item || typeof item !== 'object') return item;
+  return {
+    ...item,
+    version: typeof item.version === 'number' ? item.version : 1,
+    client_updated_at: item.client_updated_at || new Date().toISOString(),
+  };
+}
+
+/**
  * Default student profile template (neutral, supportive, skippable)
  */
 export function getDefaultStudentProfile() {

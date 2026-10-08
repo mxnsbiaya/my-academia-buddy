@@ -3336,3 +3336,305 @@
   gap: 12px;
   margin-top: 12px;
 }
+
+/* ==========================================================================
+   Phase 3: User Accounts, Cloud Sync & Migration Styles
+   ========================================================================== */
+
+/* Sync Pill */
+.header-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  transition: all 0.2s ease;
+}
+
+.sync-pill-synced {
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+.sync-pill-syncing {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.sync-pill-offline {
+  border-color: rgba(148, 163, 184, 0.3);
+  color: #94a3b8;
+}
+
+.sync-pill-conflict {
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
+.sync-pill-local {
+  border-color: rgba(56, 189, 248, 0.3);
+  color: var(--accent-cyan);
+}
+
+.header-account-btn.account-active {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+}
+
+.sidebar-account-trigger {
+  margin-bottom: 6px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  color: var(--text-primary);
+}
+
+.status-indicator.status-synced {
+  background-color: var(--success);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.status-indicator.status-syncing {
+  background-color: var(--warning);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+}
+
+/* Auth Modal */
+.auth-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-unconfigured-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fef3c7;
+  font-size: 13px;
+}
+
+.auth-unconfigured-banner code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #fbbf24;
+}
+
+.auth-profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+}
+
+.auth-avatar-circle {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+
+.auth-profile-details h4 {
+  margin: 0 0 2px 0;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.auth-profile-email {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.auth-status-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-weight: 600;
+}
+
+.auth-pill-success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.auth-details-box {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.auth-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border-default);
+  margin-bottom: 8px;
+}
+
+.auth-tab-btn {
+  flex: 1;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-tab-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.auth-alert {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.auth-alert-error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.auth-alert-success {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.auth-link-btn {
+  background: transparent;
+  border: none;
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.auth-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.auth-form-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.auth-footer-privacy {
+  text-align: center;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Migration Modal */
+.migration-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.migration-intro {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.migration-inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 10px;
+}
+
+.inventory-stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  text-align: center;
+}
+
+.inventory-stat-icon {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.inventory-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.inventory-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.migration-backup-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px dashed var(--border-default);
+}
+
+.migration-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}

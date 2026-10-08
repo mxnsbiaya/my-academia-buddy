@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
 import { AppProvider } from './context/AppContext';
 import { useApp } from './context/useApp';
 import Sidebar from './components/Sidebar';
@@ -9,6 +11,8 @@ import { DataModal } from './components/DataModal';
 import { CheckInModal } from './components/CheckInModal';
 import { ProfileModal } from './components/ProfileModal';
 import { OnboardingModal } from './components/OnboardingModal';
+import { AuthModal } from './components/AuthModal';
+import { MigrationModal } from './components/MigrationModal';
 
 import Dashboard from './pages/Dashboard';
 import Courses from './pages/Courses';
@@ -22,6 +26,7 @@ import './App.css';
 function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dataModalOpen, setDataModalOpen] = useState(false);
+  const { user } = useAuth();
   const {
     isCheckInModalOpen,
     closeCheckInModal,
@@ -29,6 +34,11 @@ function AppContent() {
     closeProfileModal,
     isOnboardingModalOpen,
     closeOnboardingModal,
+    isAuthModalOpen,
+    closeAuthModal,
+    isMigrationModalOpen,
+    closeMigrationModal,
+    handleMigrationComplete,
   } = useApp();
 
   return (
@@ -75,6 +85,16 @@ function AppContent() {
           isOpen={isOnboardingModalOpen}
           onClose={closeOnboardingModal}
         />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={closeAuthModal}
+        />
+        <MigrationModal
+          isOpen={isMigrationModalOpen}
+          onClose={closeMigrationModal}
+          userId={user?.id}
+          onMigrationComplete={handleMigrationComplete}
+        />
       </div>
     </BrowserRouter>
   );
@@ -82,9 +102,11 @@ function AppContent() {
 
 export function App() {
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <AuthProvider>
+      <AppProvider>
+        <AppContent />
+      </AppProvider>
+    </AuthProvider>
   );
 }
 

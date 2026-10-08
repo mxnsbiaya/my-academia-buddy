@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { useApp } from '../context/useApp';
+import { useAuth } from '../context/useAuth';
 
 export function Header({ onToggleSidebar, onOpenDataModal }) {
+  const { user } = useAuth();
   const {
     assignments,
     exams,
@@ -9,7 +11,10 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
     checkIns = [],
     openCheckInModal,
     openProfileModal,
+    openAuthModal,
     adaptiveSignals,
+    syncStatus,
+    syncConflict,
   } = useApp();
 
   const urgentCount = useMemo(() => {
@@ -48,6 +53,21 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
     return diffDays < 5;
   }, [checkIns]);
 
+  const syncStatusDetails = useMemo(() => {
+    switch (syncStatus) {
+      case 'synced':
+        return { label: 'Synced', icon: '🟢', className: 'sync-pill-synced', title: 'All academic data synced to cloud' };
+      case 'syncing':
+        return { label: 'Syncing...', icon: '🟡', className: 'sync-pill-syncing', title: 'Saving changes to Supabase...' };
+      case 'offline':
+        return { label: 'Offline', icon: '⚪', className: 'sync-pill-offline', title: 'Working offline. Changes queued in local cache.' };
+      case 'conflict':
+        return { label: 'Conflict', icon: '🔴', className: 'sync-pill-conflict', title: `Edit conflict detected: ${syncConflict?.entity || 'record'}. Retaining local version.` };
+      default:
+        return { label: 'Local Only', icon: '💾', className: 'sync-pill-local', title: 'Saved locally in browser. Sign in to sync across devices.' };
+    }
+  }, [syncStatus, syncConflict]);
+
   return (
     <header className="app-header">
       <div className="header-left">
@@ -78,6 +98,12 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
             <span>+20% Buffer Active</span>
           </div>
         )}
+
+        {/* Real-time Cloud Sync Pill */}
+        <div className={`header-sync-pill ${syncStatusDetails.className}`} title={syncStatusDetails.title}>
+          <span className="sync-icon" aria-hidden="true">{syncStatusDetails.icon}</span>
+          <span className="sync-label">{syncStatusDetails.label}</span>
+        </div>
       </div>
 
       <div className="header-right">
@@ -103,6 +129,19 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
           <span aria-hidden="true">👤</span>
           <span className="header-btn-label">
             {studentProfile?.name ? studentProfile.name.split(' ')[0] : 'Profile'}
+          </span>
+        </button>
+
+        {/* Account / Cloud Authentication */}
+        <button
+          type="button"
+          className={`header-btn header-account-btn ${user ? 'account-active' : ''}`}
+          onClick={openAuthModal}
+          title={user ? `Signed in as ${user.email}` : 'Sign in or create account to sync across devices'}
+        >
+          <span aria-hidden="true">{user ? '🎓' : '🔑'}</span>
+          <span className="header-btn-label">
+            {user ? (user.user_metadata?.full_name ? user.user_metadata.full_name.split(' ')[0] : user.email?.split('@')[0]) : 'Sign In'}
           </span>
         </button>
 
