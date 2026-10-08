@@ -103,13 +103,23 @@ describe('Component Integration Tests', () => {
   });
 
   describe('Academic Coach Modals', () => {
-    it('renders Weekly Check-In Modal and allows navigating questions', () => {
+    it('renders Weekly Check-In Modal and allows navigating through steps', () => {
       renderWithProviders(<CheckInModal isOpen={true} onClose={() => {}} />);
 
       expect(screen.getByText(/Weekly Academic Check-In/i)).toBeInTheDocument();
-      expect(screen.getByText(/Completed/i)).toBeInTheDocument();
-      expect(screen.getByText(/Partially/i)).toBeInTheDocument();
-      expect(screen.getByText(/Not Started/i)).toBeInTheDocument();
+      expect(screen.getByText(/Step 1 of 5: Attendance/i)).toBeInTheDocument();
+
+      // Click Next Step to navigate to Topics & Mastery (Step 2)
+      const nextBtn = screen.getByRole('button', { name: /Next Step/i });
+      fireEvent.click(nextBtn);
+
+      expect(screen.getByText(/Step 2 of 5: Topics & Mastery/i)).toBeInTheDocument();
+
+      // Navigate to Step 3 (Study Sessions)
+      fireEvent.click(screen.getByRole('button', { name: /Next Step/i }));
+      expect(screen.getByText(/Step 3 of 5: Study Sessions/i)).toBeInTheDocument();
+      expect(screen.getByText('All On Track', { selector: 'strong' })).toBeInTheDocument();
+      expect(screen.getByText('Partially Done', { selector: 'strong' })).toBeInTheDocument();
     });
 
     it('renders Student Profile Modal with adaptive signals and commitments', () => {

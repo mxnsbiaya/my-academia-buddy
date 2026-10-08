@@ -1,32 +1,34 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/useApp';
-import { Badge } from '../components/Badge';
-import { formatReadableDate } from '../services/scheduler';
-import { calculateCourseReadiness } from '../services/coach';
+import { formatReadableDate, timeToMinutes } from '../services/scheduler';
+import { t } from '../services/i18n';
 
 export function Dashboard() {
   const {
-    courses,
-    assignments,
-    exams,
-    studyPlan,
-    insights,
-    studentProfile,
+    courses = [],
+    assignments = [],
+    exams = [],
+    studyPlan = [],
+    studentProfile = {},
+    timetable = [],
+    transitionBufferMinutes = 15,
     syllabusTopics = [],
     checkIns = [],
-    adaptiveSignals,
-    emergencyExamMode,
+    adaptiveSignals = {},
+    emergencyExamMode = false,
     toggleEmergencyExamMode,
     toggleSessionCompleted,
     openCheckInModal,
     loadScenario,
   } = useApp();
 
+  const [showDetailedStats, setShowDetailedStats] = useState(false);
+
   const completedAssignmentsCount = assignments.filter((a) => a.completed).length;
   const pendingAssignments = assignments.filter((a) => !a.completed);
 
-  // Filter exams in the future or today
+  // Upcoming exams in future or today
   const upcomingExams = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -40,37 +42,88 @@ export function Dashboard() {
       .sort((a, b) => new Date(a.date) - new Date(b.date));
   }, [exams]);
 
-  // Tasks due within 7 days
-  const tasksDueSoon = useMemo(() => {
+  // Combined urgent deliverables (assignments & exams) in the next 14 days
+  const upcomingDeliverables = useMemo(() => {
     const now = new Date();
-    const weekFromNow = new Date(now);
-    weekFromNow.setDate(weekFromNow.getDate() + 7);
+    now.setHours(0, 0, 0, 0);
 
-    return pendingAssignments
-      .filter((a) => {
-        if (!a.dueDate) return false;
-        const due = new Date(`${a.dueDate}T23:59:59`);
-        return due >= now && due <= weekFromNow;
-      })
-      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-  }, [pendingAssignments]);
+    const items = [];
 
-  // Study plan stats
-  const taskSessions = useMemo(
-    () => studyPlan.filter((s) => s.type !== 'Break'),
-    [studyPlan]
-  );
-  const completedSessionsCount = taskSessions.filter((s) => s.completed).length;
-  const totalPlannedHours = useMemo(() => {
-    const totalMinutes = taskSessions.reduce((sum, s) => sum + Number(s.sessionLength || 0), 0);
-    return (totalMinutes / 60).toFixed(1);
-  }, [taskSessions]);
+    pendingAssignments.forEach((a) => {
+      if (!a.dueDate) return;
+      const due = new Date(`${a.dueDate}T23:59:59`);
+      const diffDays = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0) {
+        items.push({
+          id: `asg-${a.id}`,
+          title: a.title,
+          course: a.course,
+          date: a.dueDate,
+          diffDays,
+          type: 'Assignment',
+          priority: a.priority || 'Medium',
+          weightPercent: a.weightPercent,
+        });
+      }
+    });
 
-  const studyProgressPercent =
-    taskSessions.length === 0 ? 0 : Math.round((completedSessionsCount / taskSessions.length) * 100);
+    upcomingExams.forEach((e) => {
+      const examDate = new Date(`${e.date}T23:59:59`);
+      const diffDays = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0) {
+        items.push({
+          id: `exam-${e.id}`,
+          title: e.title,
+          course: e.course,
+          date: e.date,
+          diffDays,
+          type: 'Exam',
+          priority: 'High',
+          weightPercent: e.weightPercent,
+        });
+      }
+    });
 
-  // "What should I do today?" Daily Agenda
-  // Filter sessions for today's date (or next scheduled day if today is empty)
+    return items.sort((a, b) => a.diffDays - b.diffDays);
+  }, [pendingAssignments, upcomingExams]);
+
+  const nextDeadline = upcomingDeliverables[0] || null;
+
+  // Next scheduled class from Timetable
+  const nextClass = (() => {
+    if (!timetable || timetable.length === 0) return null;
+
+    const daysOrder = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const now = new Date();
+    const currentDayName = daysOrder[now.getDay()];
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    // 1. Look for remaining classes today
+    const todayClasses = timetable
+      .filter((e) => e.dayOfWeek === currentDayName && timeToMinutes(e.startTime) > currentMinutes)
+      .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+
+    if (todayClasses.length > 0) {
+      return { ...todayClasses[0], isToday: true };
+    }
+
+    // 2. Look for tomorrow or closest upcoming day's first class
+    for (let offset = 1; offset <= 7; offset++) {
+      const targetDayIndex = (now.getDay() + offset) % 7;
+      const targetDayName = daysOrder[targetDayIndex];
+      const dayClasses = timetable
+        .filter((e) => e.dayOfWeek === targetDayName)
+        .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+
+      if (dayClasses.length > 0) {
+        return { ...dayClasses[0], isToday: false, dayLabel: targetDayName };
+      }
+    }
+
+    return null;
+  })();
+
+  // Today's Study Sessions
   const todayDateStr = useMemo(() => {
     const now = new Date();
     const y = now.getFullYear();
@@ -79,11 +132,16 @@ export function Dashboard() {
     return `${y}-${m}-${d}`;
   }, []);
 
+  const taskSessions = useMemo(
+    () => studyPlan.filter((s) => s.type !== 'Break'),
+    [studyPlan]
+  );
+
   const todaySessions = useMemo(() => {
     const forToday = taskSessions.filter((s) => s.date === todayDateStr);
     if (forToday.length > 0) return forToday;
 
-    // Fallback: next upcoming day's sessions
+    // Fallback: next scheduled day with unfinished work
     const sortedFuture = [...taskSessions]
       .filter((s) => !s.completed)
       .sort((a, b) => (a.date > b.date ? 1 : -1));
@@ -93,39 +151,11 @@ export function Dashboard() {
     return sortedFuture.filter((s) => s.date === firstDate);
   }, [taskSessions, todayDateStr]);
 
-  const todayDateLabel = useMemo(() => {
-    if (todaySessions.length === 0) return 'Today';
-    if (todaySessions[0].date === todayDateStr) return 'Today';
-    return formatReadableDate(todaySessions[0].date);
-  }, [todaySessions, todayDateStr]);
+  const activeFocusSession = useMemo(() => {
+    return todaySessions.find((s) => !s.completed) || null;
+  }, [todaySessions]);
 
-  // Course Readiness calculated for each course
-  const courseReadinessList = useMemo(() => {
-    return courses.map((course) =>
-      calculateCourseReadiness(course, syllabusTopics, assignments, exams)
-    );
-  }, [courses, syllabusTopics, assignments, exams]);
-
-  // Most urgent course (lowest readiness score or nearest exam)
-  const mostUrgentCourse = useMemo(() => {
-    if (courseReadinessList.length === 0) return null;
-    const sorted = [...courseReadinessList].sort((a, b) => {
-      // Prioritize courses with exams within 7 days
-      if (a.hasExamUrgency && !b.hasExamUrgency) return -1;
-      if (!a.hasExamUrgency && b.hasExamUrgency) return 1;
-      return a.readinessScore - b.readinessScore;
-    });
-    return sorted[0];
-  }, [courseReadinessList]);
-
-  // Outstanding topics across all courses (unstarted or low confidence)
-  const outstandingTopics = useMemo(() => {
-    return syllabusTopics
-      .filter((t) => t.status === 'not_started' || (t.confidence && t.confidence <= 2))
-      .slice(0, 5);
-  }, [syllabusTopics]);
-
-  // Has check-in been completed recently?
+  // Check-in status
   const hasRecentCheckIn = useMemo(() => {
     if (!checkIns || checkIns.length === 0) return false;
     const last = checkIns[checkIns.length - 1];
@@ -134,65 +164,37 @@ export function Dashboard() {
     return diffDays < 5;
   }, [checkIns]);
 
+  // Topic mastery count
+  const topicsMasteredCount = useMemo(() => {
+    return syllabusTopics.filter((t) => t.status === 'completed' || t.status === 'mastered').length;
+  }, [syllabusTopics]);
+
   return (
-    <div className="page-container">
-      {/* Header */}
-      <div className="page-header">
+    <div className="page-container" style={{ maxWidth: '1180px', margin: '0 auto', paddingBottom: '90px' }}>
+      {/* Header with Title and Persona Switcher */}
+      <div className="page-header" style={{ marginBottom: '24px' }}>
         <div>
-          <div className="planner-flagship-pill">Adaptive Academic Coach</div>
-          <h1 className="page-title">Academic Dashboard</h1>
-          <p className="page-subtitle">
-            Welcome back{studentProfile?.name ? `, ${studentProfile.name}` : ''}! Workload monitoring, observable readiness, and adaptive daily guidance.
+          <div className="planner-flagship-pill" style={{ marginBottom: '6px' }}>
+            {t('nav_study_planner')}
+          </div>
+          <h1 className="page-title" style={{ fontSize: '26px', fontWeight: 800, letterSpacing: '-0.5px' }}>
+            Academic Dashboard
+          </h1>
+          <p className="page-subtitle" style={{ color: 'var(--text-secondary)', fontSize: '14px', marginTop: '2px' }}>
+            {t('dash_greeting')} {studentProfile?.name || 'Student'}! {t('dash_subtitle')}
           </p>
         </div>
-        <div className="header-actions">
-          <Link to="/syllabus-import" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span>📑</span> Import Syllabus
-          </Link>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={openCheckInModal}
-          >
-            <span>🧭</span> Take Weekly Check-In
-          </button>
-          <Link to="/study-planner" className="btn btn-primary">
-            <span>✨</span> Open Adaptive Planner
-          </Link>
-        </div>
-      </div>
 
-      {/* Adaptive Coach Guidance Banner */}
-      <section className="coach-status-banner" aria-label="Academic Coach Status">
-        <div className="coach-banner-left">
-          <div className="coach-avatar-badge">🧠</div>
-          <div>
-            <div className="coach-banner-title">
-              <strong>Personal Coach Status:</strong>{' '}
-              {adaptiveSignals?.paceMultiplier > 1.1 ? (
-                <span className="coach-buffer-tag">
-                  +{Math.round((adaptiveSignals.paceMultiplier - 1) * 100)}% Buffer Pace Active
-                </span>
-              ) : (
-                <span className="coach-normal-tag">Balanced Realistic Pace</span>
-              )}
-            </div>
-            <p className="coach-banner-description">
-              {adaptiveSignals?.paceMultiplier > 1.1
-                ? 'Based on recent check-ins, we added breathing room buffer to study session durations so you stay on track without burnout.'
-                : 'Your study plan is running at standard calibrated pace with high consistency.'}
-            </p>
-          </div>
-        </div>
-
-        <div className="coach-banner-actions">
-          <div className="persona-switch-group">
-            <span className="persona-switch-label">Simulate Student:</span>
+        {/* Quick simulation controls */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="persona-switch-group" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Demo:</span>
             <button
               type="button"
               className={`btn btn-xs ${studentProfile?.name?.includes('Alex') ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => loadScenario('consistent')}
-              title="Simulate Student A: Alex Chen (Consistent, On-Track)"
+              title="Simulate Alex Chen (Consistent, On-Track)"
+              style={{ fontSize: '11px', padding: '3px 8px' }}
             >
               🟢 Alex (Consistent)
             </button>
@@ -200,7 +202,8 @@ export function Dashboard() {
               type="button"
               className={`btn btn-xs ${studentProfile?.name?.includes('Jordan') ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => loadScenario('delayed')}
-              title="Simulate Student B: Jordan Taylor (Delayed, Catch-Up)"
+              title="Simulate Jordan Taylor (Delayed, Catch-Up)"
+              style={{ fontSize: '11px', padding: '3px 8px' }}
             >
               🟠 Jordan (Delayed)
             </button>
@@ -208,378 +211,480 @@ export function Dashboard() {
 
           <button
             type="button"
-            className={`btn btn-sm ${emergencyExamMode ? 'btn-danger' : 'btn-outline'}`}
+            className={`btn btn-sm ${emergencyExamMode ? 'btn-danger' : 'btn-secondary'}`}
             onClick={toggleEmergencyExamMode}
-            title="Focus schedule heavily on upcoming exams"
+            style={{ fontSize: '12px' }}
           >
-            {emergencyExamMode ? '🚨 Emergency Exam Mode ON' : '⚡ Enable Emergency Exam Mode'}
+            {emergencyExamMode ? '🚨 Emergency Exam Mode ON' : '⚡ Exam Mode'}
           </button>
         </div>
-      </section>
+      </div>
 
-      {/* Weekly Check-In Reminder Banner */}
-      {!hasRecentCheckIn && (
-        <section className="checkin-reminder-banner" aria-label="Weekly Check-In Due">
-          <div className="checkin-banner-content">
-            <span className="checkin-banner-icon" aria-hidden="true">⏱️</span>
-            <div>
-              <h3>Weekly Academic Check-In Ready</h3>
-              <p>
-                Takes approximately 2 minutes. Reflect on lectures attended, readings completed, and topic confidence so your coach can adapt your schedule.
-              </p>
+      {/* PRIORITY 1: What Should I Do Now? (Hero Card) */}
+      <section
+        className="card"
+        style={{
+          padding: '24px',
+          borderRadius: '16px',
+          background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(30, 41, 59, 0.85) 100%)',
+          border: '1px solid rgba(56, 189, 248, 0.3)',
+          boxShadow: '0 8px 30px rgba(0, 0, 0, 0.25)',
+          marginBottom: '24px',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ flex: 1, minWidth: '280px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '20px' }}>🎯</span>
+              <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--accent-cyan)' }}>
+                {t('dash_hero_title')}
+              </span>
             </div>
-          </div>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={openCheckInModal}
-          >
-            Start 2-Min Check-In →
-          </button>
-        </section>
-      )}
 
-      {/* Top Stat Cards Grid */}
-      <section className="stats-grid" aria-label="Key Academic Metrics">
-        <div className="stat-card">
-          <div className="stat-icon-wrapper icon-blue" aria-hidden="true">📚</div>
-          <div className="stat-content">
-            <span className="stat-label">Active Courses</span>
-            <div className="stat-value">{courses.length}</div>
-            <span className="stat-subtext">
-              {syllabusTopics.length} syllabus topics tracked
-            </span>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrapper icon-amber" aria-hidden="true">📝</div>
-          <div className="stat-content">
-            <span className="stat-label">Pending Assignments</span>
-            <div className="stat-value">{pendingAssignments.length}</div>
-            <span className="stat-subtext">
-              {completedAssignmentsCount} completed so far
-            </span>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrapper icon-purple" aria-hidden="true">📅</div>
-          <div className="stat-content">
-            <span className="stat-label">Next Exam</span>
-            <div className="stat-value">
-              {upcomingExams.length > 0 ? upcomingExams[0].course : 'None'}
-            </div>
-            <span className="stat-subtext">
-              {upcomingExams.length > 0 ? `${upcomingExams[0].date}` : 'No upcoming exams'}
-            </span>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrapper icon-cyan" aria-hidden="true">🎯</div>
-          <div className="stat-content">
-            <span className="stat-label">Urgent Course</span>
-            <div className="stat-value">
-              {mostUrgentCourse ? mostUrgentCourse.courseName : 'None'}
-            </div>
-            <span className="stat-subtext">
-              {mostUrgentCourse
-                ? `${mostUrgentCourse.readinessScore}% readiness (${mostUrgentCourse.tier})`
-                : 'All courses balanced'}
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* "What Should I Do Today?" Daily Agenda Section */}
-      <section className="card card-section daily-agenda-section" aria-label="What Should I Do Today">
-        <div className="card-section-header">
-          <div>
-            <div className="section-pill">Actionable Daily Plan</div>
-            <h2 className="card-section-title">What Should I Do {todayDateLabel}?</h2>
-            <p className="card-section-subtitle">
-              Prioritized, concrete micro-steps generated by your coach. No vague instructions.
-            </p>
-          </div>
-          <span className="badge-neutral">{todaySessions.length} session(s) scheduled</span>
-        </div>
-
-        {todaySessions.length === 0 ? (
-          <div className="empty-placeholder">
-            <span>🎉</span>
-            <h3>No study session currently queued</h3>
-            <p>No study sessions scheduled for {todayDateLabel.toLowerCase()}.</p>
-            <p className="subtext">
-              Take time to recharge, or open the Adaptive Planner to generate your next study block.
-            </p>
-            <Link to="/study-planner" className="btn btn-secondary btn-sm" style={{ marginTop: '10px' }}>
-              Open Adaptive Planner
-            </Link>
-          </div>
-        ) : (
-          <div className="daily-agenda-list">
-            {todaySessions.map((session) => (
-              <div
-                key={session.id}
-                className={`daily-agenda-card ${session.completed ? 'session-completed' : ''}`}
-                style={{ borderLeftColor: session.courseColor || '#0284c7' }}
-              >
-                <div className="agenda-card-top">
-                  <div className="agenda-time-pill">
-                    <strong>{session.startTime} – {session.endTime}</strong>
-                    <span>({session.sessionLength} min)</span>
-                  </div>
-
-                  <div className="agenda-course-info">
-                    <h3 className="agenda-task-title">{session.title}</h3>
-                    <div className="agenda-tag-row">
-                      <span className="course-tag" style={{ borderColor: session.courseColor }}>
-                        {session.course}
-                      </span>
-                      <Badge variant={session.priority}>{session.priority} Priority</Badge>
-                      <Badge variant={session.difficulty}>{session.difficulty} Difficulty</Badge>
-                    </div>
-                  </div>
-
-                  <div className="agenda-action-col">
-                    <button
-                      type="button"
-                      className={`btn btn-sm ${session.completed ? 'btn-secondary' : 'btn-success'}`}
-                      onClick={() => toggleSessionCompleted(session.id)}
-                    >
-                      {session.completed ? 'Undo ✓' : 'Mark Completed ✓'}
-                    </button>
-                  </div>
+            {!hasRecentCheckIn ? (
+              <div>
+                <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 6px 0', color: '#fff' }}>
+                  {t('dash_hero_action_checkin')}
+                </h2>
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-secondary)', maxWidth: '560px' }}>
+                  Reflect on class attendance and topic mastery so your coach can adapt upcoming deadlines and study blocks.
+                </p>
+                <div style={{ marginTop: '16px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={openCheckInModal}
+                    style={{ fontSize: '14px', fontWeight: 600, padding: '10px 20px', boxShadow: '0 4px 14px rgba(56, 189, 248, 0.4)' }}
+                  >
+                    🚀 Start 2-Minute Check-In →
+                  </button>
                 </div>
-
-                <p className="agenda-recommendation">{session.recommendation}</p>
-
-                {/* Granular Concrete Micro-Steps */}
-                {session.actionBreakdown && session.actionBreakdown.length > 0 && (
-                  <div className="action-breakdown-box">
-                    <div className="breakdown-header">
-                      <span className="breakdown-icon">📋</span>
-                      <strong>Concrete Session Action Plan:</strong>
-                    </div>
-                    <ol className="action-steps-list">
-                      {session.actionBreakdown.map((step) => (
-                        <li key={step.step} className="action-step-item">
-                          <span className="step-num">{step.step}.</span>
-                          <span className="step-text">{step.action}</span>
-                          <span className="step-time">({step.duration} min)</span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
               </div>
-            ))}
+            ) : activeFocusSession ? (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <span
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                      color: 'var(--accent-cyan)',
+                    }}
+                  >
+                    {activeFocusSession.course}
+                  </span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    ⏱️ {activeFocusSession.startTime} – {activeFocusSession.endTime} ({activeFocusSession.sessionLength} min)
+                  </span>
+                </div>
+                <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 6px 0', color: '#fff' }}>
+                  {activeFocusSession.title}
+                </h2>
+                <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '580px' }}>
+                  {activeFocusSession.recommendation || activeFocusSession.explanation?.[0] || 'Focus on active retention and problem-solving.'}
+                </p>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '16px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => toggleSessionCompleted(activeFocusSession.id)}
+                    style={{ fontSize: '13px', fontWeight: 600, padding: '8px 18px' }}
+                  >
+                    ✓ Mark as Completed
+                  </button>
+                  <Link to="/study-planner" className="btn btn-secondary" style={{ fontSize: '13px' }}>
+                    View Full Plan
+                  </Link>
+                </div>
+              </div>
+            ) : nextClass && nextClass.isToday ? (
+              <div>
+                <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 6px 0', color: '#fff' }}>
+                  {t('dash_hero_action_class')}: {nextClass.courseCode} ({nextClass.startTime})
+                </h2>
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-secondary)' }}>
+                  {nextClass.courseName} • Room {nextClass.location || 'Campus'}
+                </p>
+                <div style={{ marginTop: '16px' }}>
+                  <Link to="/timetable" className="btn btn-primary" style={{ fontSize: '13px', fontWeight: 600 }}>
+                    🗓️ Open Class Timetable →
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 6px 0', color: '#fff' }}>
+                  {t('dash_hero_action_idle')}
+                </h2>
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-secondary)' }}>
+                  All immediate study sessions and check-ins are up to date. You can review upcoming materials or import new syllabi.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                  <Link to="/study-planner" className="btn btn-primary" style={{ fontSize: '13px' }}>
+                    Generate Forward Plan
+                  </Link>
+                  <Link to="/syllabus-import" className="btn btn-secondary" style={{ fontSize: '13px' }}>
+                    Import Syllabus
+                  </Link>
+                </div>
+              </div>
+            )}
           </div>
+        </div>
+      </section>
+
+      {/* PRIORITY 2 & 3: Urgent & Next Up Grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: '16px',
+          marginBottom: '24px',
+        }}
+      >
+        {/* Next Scheduled Class Card */}
+        <div
+          className="card"
+          style={{
+            padding: '20px',
+            borderRadius: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: '14px',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                <span>🗓️</span>
+                <span>{t('dash_next_class')}</span>
+              </div>
+              <Link to="/timetable" style={{ fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
+                View All →
+              </Link>
+            </div>
+
+            {nextClass ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong style={{ fontSize: '17px', color: nextClass.color || 'var(--text-primary)' }}>
+                    {nextClass.courseCode}
+                  </strong>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                      color: 'var(--accent-cyan)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {nextClass.activityType?.toUpperCase() || 'LEC'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  {nextClass.courseName}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', marginTop: '4px' }}>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                    ⏰ {nextClass.isToday ? 'Today' : nextClass.dayLabel} at {nextClass.startTime} – {nextClass.endTime}
+                  </span>
+                  {nextClass.location && (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      📍 {nextClass.location}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '12px 0', color: 'var(--text-muted)', fontSize: '13px' }}>
+                {t('dash_no_classes_today')}{' '}
+                <Link to="/timetable" style={{ color: 'var(--accent-cyan)' }}>
+                  Add your class schedule
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Next Urgent Deadline Card */}
+        <div
+          className="card"
+          style={{
+            padding: '20px',
+            borderRadius: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: '14px',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: 'var(--warning)' }}>
+                <span>⏰</span>
+                <span>{t('dash_next_deadline')}</span>
+              </div>
+              <Link to="/assignments" style={{ fontSize: '12px', color: 'var(--text-muted)', textDecoration: 'none' }}>
+                View All →
+              </Link>
+            </div>
+
+            {nextDeadline ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong style={{ fontSize: '17px' }}>{nextDeadline.title}</strong>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      backgroundColor: nextDeadline.diffDays <= 2 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                      color: nextDeadline.diffDays <= 2 ? 'var(--danger)' : 'var(--warning)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {nextDeadline.diffDays === 0
+                      ? t('dash_today')
+                      : nextDeadline.diffDays === 1
+                      ? t('dash_tomorrow')
+                      : `${nextDeadline.diffDays} ${t('dash_days')}`}
+                  </span>
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  {nextDeadline.course} • {nextDeadline.type}
+                  {nextDeadline.weightPercent ? ` (${nextDeadline.weightPercent}% of grade)` : ''}
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  📅 Due Date: {formatReadableDate(nextDeadline.date)}
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '12px 0', color: 'var(--text-muted)', fontSize: '13px' }}>
+                {t('dash_no_deadlines_soon')}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* PRIORITY 4: Academic Health & Pacing */}
+      <section
+        className="card"
+        style={{
+          padding: '20px 24px',
+          borderRadius: '14px',
+          marginBottom: '24px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '18px' }}>📊</span>
+            <strong style={{ fontSize: '15px' }}>{t('dash_pace_title')}</strong>
+          </div>
+          <div>
+            {adaptiveSignals?.paceMultiplier > 1.15 ? (
+              <span
+                style={{
+                  fontSize: '11px',
+                  padding: '3px 10px',
+                  borderRadius: '20px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                  color: 'var(--warning)',
+                  fontWeight: 700,
+                }}
+              >
+                ⚠️ Pacing Buffer Active (+{Math.round((adaptiveSignals.paceMultiplier - 1) * 100)}%)
+              </span>
+            ) : (
+              <span
+                style={{
+                  fontSize: '11px',
+                  padding: '3px 10px',
+                  borderRadius: '20px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                  color: 'var(--success)',
+                  fontWeight: 700,
+                }}
+              >
+                ✓ On Track & Calibrated
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: '14px',
+          }}
+        >
+          <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-subtle)' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('dash_topics_mastered')}</span>
+            <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px' }}>
+              {topicsMasteredCount} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>/ {syllabusTopics.length || '—'}</span>
+            </div>
+          </div>
+
+          <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-subtle)' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Consistency Rate</span>
+            <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px' }}>
+              {adaptiveSignals?.completionRate ? `${Math.round(adaptiveSignals.completionRate)}%` : '100%'}
+            </div>
+          </div>
+
+          <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-subtle)' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Weekly Check-Ins</span>
+            <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px' }}>
+              {checkIns.length} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>completed</span>
+            </div>
+          </div>
+
+          <div style={{ padding: '12px 14px', borderRadius: '10px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-subtle)' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Class Sessions</span>
+            <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px' }}>
+              {timetable.length} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>weekly</span>
+            </div>
+          </div>
+        </div>
+
+        {adaptiveSignals?.coachInsight && (
+          <p style={{ margin: '14px 0 0 0', fontSize: '13px', color: 'var(--text-secondary)', fontStyle: 'italic', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
+            💡 Coach Note: {adaptiveSignals.coachInsight}
+          </p>
         )}
       </section>
 
-      {/* Main Grid: Transparent Course Readiness & Deadlines */}
-      <div className="dashboard-grid">
-        {/* Left Column: Course Readiness Meters */}
-        <div className="dashboard-column">
-          <section className="card card-section" aria-label="Course Academic Readiness">
-            <div className="card-section-header">
-              <div>
-                <h2 className="card-section-title">Observable Course Readiness</h2>
-                <p className="card-section-subtitle">
-                  Calculated from topic coverage, homework completion, and self-reported confidence.
-                </p>
-              </div>
-              <Link to="/courses" className="section-link">Manage Syllabus →</Link>
+      {/* PRIORITY 5: Quick Useful Actions Bar */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '24px' }}>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={openCheckInModal}
+          style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+        >
+          <span>⏱️</span>
+          <span>Take Weekly Check-In</span>
+        </button>
+
+        <Link
+          to="/study-planner"
+          className="btn btn-secondary"
+          style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+        >
+          <span>✨</span>
+          <span>Open Adaptive Planner</span>
+        </Link>
+
+        <Link
+          to="/timetable"
+          className="btn btn-secondary"
+          style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+        >
+          <span>🗓️</span>
+          <span>View Class Timetable</span>
+        </Link>
+
+        <Link
+          to="/syllabus-import"
+          className="btn btn-secondary"
+          style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+        >
+          <span>📑</span>
+          <span>Import Another Syllabus</span>
+        </Link>
+      </div>
+
+      {/* Progressive Disclosure: Detailed Stats & Daily Queue */}
+      <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: '20px' }}>
+        <button
+          type="button"
+          onClick={() => setShowDetailedStats((prev) => !prev)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--accent-cyan)',
+            cursor: 'pointer',
+            fontSize: '13px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: 0,
+            marginBottom: '16px',
+          }}
+        >
+          <span>{showDetailedStats ? '▼ Hide Detailed Metrics' : '▶ View Detailed Metrics & Course Breakdown'}</span>
+        </button>
+
+        {/* Overview Stats (Always visible or toggleable with default visible for quick overview) */}
+        <section className="stats-grid" aria-label="Detailed Academic Metrics">
+          <div className="stat-card">
+            <div className="stat-icon-wrapper icon-blue" aria-hidden="true">📚</div>
+            <div className="stat-content">
+              <span className="stat-label">Active Courses</span>
+              <div className="stat-value">{courses.length}</div>
+              <span className="stat-subtext">
+                {syllabusTopics.length} syllabus topics tracked
+              </span>
             </div>
+          </div>
 
-            {/* Transparent Disclaimer Box */}
-            <div className="readiness-disclaimer-card">
-              <span className="disclaimer-icon" aria-hidden="true">ℹ️</span>
-              <p>
-                <strong>Transparent Readiness Indicator:</strong> This score reflects your documented progress through syllabus topics and homework tasks. It is an organizational coaching metric, never a scientifically validated probability of passing an exam.
-              </p>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper icon-amber" aria-hidden="true">📝</div>
+            <div className="stat-content">
+              <span className="stat-label">Pending Assignments</span>
+              <div className="stat-value">{pendingAssignments.length}</div>
+              <span className="stat-subtext">
+                {completedAssignmentsCount} completed so far
+              </span>
             </div>
+          </div>
 
-            {courseReadinessList.length === 0 ? (
-              <div className="empty-placeholder">
-                <p>No courses registered yet. Add courses and syllabus topics to see your readiness.</p>
-                <Link to="/courses" className="btn btn-xs btn-outline">Add Courses</Link>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper icon-purple" aria-hidden="true">📅</div>
+            <div className="stat-content">
+              <span className="stat-label">Next Exam</span>
+              <div className="stat-value">
+                {upcomingExams.length > 0 ? upcomingExams[0].course : 'None'}
               </div>
-            ) : (
-              <div className="readiness-cards-list">
-                {courseReadinessList.map((cr) => (
-                  <div key={cr.courseId || cr.courseName} className="readiness-card">
-                    <div className="readiness-top-row">
-                      <div>
-                        <strong className="readiness-course-name">{cr.courseName}</strong>
-                        {cr.hasExamUrgency && (
-                          <span className="exam-urgency-tag">
-                            ⚠️ Exam in {cr.daysToNearestExam} days
-                          </span>
-                        )}
-                      </div>
-                      <div className="readiness-score-badge" style={{ backgroundColor: `${cr.tierColor}20`, color: cr.tierColor }}>
-                        {cr.readinessScore}% ({cr.tier})
-                      </div>
-                    </div>
-
-                    <div className="progress-bar-track">
-                      <div
-                        className="progress-bar-fill"
-                        style={{
-                          width: `${cr.readinessScore}%`,
-                          backgroundColor: cr.tierColor,
-                        }}
-                        role="progressbar"
-                        aria-valuenow={cr.readinessScore}
-                        aria-valuemin="0"
-                        aria-valuemax="100"
-                      />
-                    </div>
-
-                    <div className="readiness-metrics-row">
-                      <span>📖 Topics: {cr.topicProgress.completed}/{cr.topicProgress.total}</span>
-                      <span>•</span>
-                      <span>📝 Tasks: {cr.assignmentProgress.completed}/{cr.assignmentProgress.total}</span>
-                      <span>•</span>
-                      <span>⭐ Confidence: {cr.avgConfidence}/5</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Outstanding Topics Card */}
-          <section className="card card-section" aria-label="Outstanding Topics">
-            <div className="card-section-header">
-              <h2 className="card-section-title">Outstanding Syllabus Topics</h2>
-              <span className="badge-neutral">{outstandingTopics.length} need focus</span>
+              <span className="stat-subtext">
+                {upcomingExams.length > 0 ? `${upcomingExams[0].date}` : 'No upcoming exams'}
+              </span>
             </div>
+          </div>
 
-            {outstandingTopics.length === 0 ? (
-              <div className="empty-placeholder">
-                <p>All syllabus topics are currently practiced or have good confidence! 🌟</p>
-              </div>
-            ) : (
-              <div className="outstanding-topics-list">
-                {outstandingTopics.map((top) => (
-                  <div key={top.id} className="outstanding-topic-item">
-                    <div>
-                      <div className="outstanding-title">{top.title}</div>
-                      <div className="outstanding-meta">
-                        <span className="topic-course-badge">{top.courseName}</span>
-                        <span>• Week {top.weekNumber || top.week}</span>
-                        <span>• Status: {top.status === 'not_started' ? 'Not Started' : top.status}</span>
-                      </div>
-                    </div>
-                    <Link to="/courses" className="btn btn-xs btn-outline">
-                      Update →
-                    </Link>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-
-        {/* Right Column: Deadlines & Upcoming Exams */}
-        <div className="dashboard-column">
-          {/* Due Soon */}
-          <section className="card card-section" aria-label="Tasks Due Soon">
-            <div className="card-section-header">
-              <h2 className="card-section-title">Due in the Next 7 Days</h2>
-              <Link to="/assignments" className="section-link">View all →</Link>
+          <div className="stat-card">
+            <div className="stat-icon-wrapper icon-cyan" aria-hidden="true">⏱️</div>
+            <div className="stat-content">
+              <span className="stat-label">Class Sessions</span>
+              <div className="stat-value">{timetable.length}</div>
+              <span className="stat-subtext">
+                {transitionBufferMinutes}m travel buffer
+              </span>
             </div>
+          </div>
+        </section>
 
-            {tasksDueSoon.length === 0 ? (
-              <div className="empty-placeholder">
-                <span>🎉</span>
-                <p>No assignments due in the next 7 days. You are ahead of schedule!</p>
-              </div>
-            ) : (
-              <div className="task-feed">
-                {tasksDueSoon.map((task) => (
-                  <div key={task.id} className="feed-item">
-                    <div className="feed-item-left">
-                      <div className="feed-title">{task.title}</div>
-                      <div className="feed-meta">
-                        <span className="feed-course">{task.course}</span>
-                        <span>•</span>
-                        <span className="feed-date">Due: {task.dueDate}</span>
-                      </div>
-                    </div>
-                    <Badge variant={task.priority}>{task.priority}</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Upcoming Exams */}
-          <section className="card card-section" aria-label="Upcoming Exams">
-            <div className="card-section-header">
-              <h2 className="card-section-title">Upcoming Exams</h2>
-              <Link to="/exams" className="section-link">Manage exams →</Link>
-            </div>
-
-            {upcomingExams.length === 0 ? (
-              <div className="empty-placeholder">
-                <p>No upcoming exams scheduled.</p>
-                <Link to="/exams" className="btn btn-xs btn-outline">Schedule an Exam</Link>
-              </div>
-            ) : (
-              <div className="task-feed">
-                {upcomingExams.map((exam) => (
-                  <div key={exam.id} className="feed-item">
-                    <div className="feed-item-left">
-                      <div className="feed-title">{exam.title}</div>
-                      <div className="feed-meta">
-                        <span className="feed-course">{exam.course}</span>
-                        <span>•</span>
-                        <span className="feed-date">{exam.date}</span>
-                        {exam.location && <span>• {exam.location}</span>}
-                      </div>
-                    </div>
-                    <Badge variant="exam">Exam</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Study Plan Progress Summary */}
-          <section className="card card-section" aria-label="Study Plan Progress">
-            <div className="card-section-header">
-              <h2 className="card-section-title">Weekly Study Plan Execution</h2>
-              <span className="progress-badge">{studyProgressPercent}% Done</span>
-            </div>
-
-            <div className="progress-container">
-              <div className="progress-bar-track">
-                <div
-                  className="progress-bar-fill fill-cyan"
-                  style={{ width: `${studyProgressPercent}%` }}
-                  role="progressbar"
-                  aria-valuenow={studyProgressPercent}
-                  aria-valuemin="0"
-                  aria-valuemax="100"
-                />
-              </div>
-              <div className="progress-subtext">
-                <span>{completedSessionsCount} of {taskSessions.length} sessions completed ({totalPlannedHours}h total)</span>
-              </div>
-            </div>
-
-            {insights?.hasImpossibleSchedule && (
-              <div className="warning-callout" style={{ marginTop: '12px' }}>
-                <strong>Overload Notice:</strong> Total estimated workload exceeds available study hours prior to deadlines. Add more availability windows.
-              </div>
-            )}
-          </section>
-        </div>
+        {/* Daily Session Queue / Spotlight */}
+        {todaySessions.length === 0 && (
+          <div className="card" style={{ marginTop: '16px', padding: '24px', textAlign: 'center' }}>
+            <span style={{ fontSize: '32px' }}>🎉</span>
+            <h3 style={{ margin: '8px 0 4px 0', fontSize: '15px', fontWeight: 600 }}>
+              No study session currently queued
+            </h3>
+            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '13px' }}>
+              All planned study sessions for today are complete. Open the Adaptive Planner to generate your next study block.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

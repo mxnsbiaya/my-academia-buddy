@@ -14,10 +14,14 @@
  * - Impossible schedule detection and workload analysis
  */
 
+import { normalizeCourseCode } from './duplicateDetector';
+import { detectAvailabilityConflicts } from './timetableService';
+
 export const DAY_START_MINUTES = 6 * 60; // 06:00
 export const NIGHT_START_MINUTES = 22 * 60; // 22:00
 export const MIN_SESSION_MINUTES = 30;
 export const BREAK_MINUTES = 15;
+export const DEFAULT_TRANSITION_BUFFER_MINUTES = 15;
 export const MAX_PLANNING_DAYS = 35; // 5-week rolling horizon
 
 export const DAY_INDEX = {
@@ -454,7 +458,13 @@ export function getTaskScore(task, sessionDate, dailyCount = 0) {
  * @param {Date} [startDate] Starting date (defaults to today)
  * @returns {Array} List of usable slot objects
  */
-export function buildPlanningSlots(availability, lastDeadline, startDate = new Date()) {
+export function buildPlanningSlots(
+  availability,
+  lastDeadline,
+  startDate = new Date(),
+  timetable = [],
+  transitionBufferMinutes = DEFAULT_TRANSITION_BUFFER_MINUTES
+) {
   const today = new Date(startDate);
   today.setHours(12, 0, 0, 0);
 
@@ -484,12 +494,54 @@ export function buildPlanningSlots(availability, lastDeadline, startDate = new D
 
       if (endMinutes - startMinutes < MIN_SESSION_MINUTES) return;
 
-      slots.push({
-        id: `slot-${toLocalDateString(cursor)}-${slot.id || slot.startTime}`,
-        day: slot.day,
-        date: toLocalDateString(cursor),
-        startMinutes,
-        endMinutes,
+      // Check if timetable classes exist on this day
+      const dayClasses = (timetable || []).filter(
+        (t) => t.dayOfWeek?.toLowerCase() === slot.day?.toLowerCase()
+      );
+
+      if (dayClasses.length === 0) {
+        slots.push({
+          id: `slot-${toLocalDateString(cursor)}-${slot.id || slot.startTime}`,
+          day: slot.day,
+          date: toLocalDateString(cursor),
+          startMinutes,
+          endMinutes,
+        });
+        return;
+      }
+
+      // Carve out timetable class intervals with transition buffer
+      let intervals = [{ start: startMinutes, end: endMinutes }];
+      dayClasses.forEach((cls) => {
+        const clsStart = Math.max(0, timeToMinutes(cls.startTime) - transitionBufferMinutes);
+        const clsEnd = timeToMinutes(cls.endTime) + transitionBufferMinutes;
+
+        const nextIntervals = [];
+        intervals.forEach((inv) => {
+          if (inv.end <= clsStart || inv.start >= clsEnd) {
+            nextIntervals.push(inv);
+            return;
+          }
+          if (inv.start < clsStart) {
+            nextIntervals.push({ start: inv.start, end: clsStart });
+          }
+          if (inv.end > clsEnd) {
+            nextIntervals.push({ start: clsEnd, end: inv.end });
+          }
+        });
+        intervals = nextIntervals;
+      });
+
+      intervals.forEach((inv, subIdx) => {
+        if (inv.end - inv.start >= MIN_SESSION_MINUTES) {
+          slots.push({
+            id: `slot-${toLocalDateString(cursor)}-${slot.id || slot.startTime}-${subIdx}`,
+            day: slot.day,
+            date: toLocalDateString(cursor),
+            startMinutes: inv.start,
+            endMinutes: inv.end,
+          });
+        }
       });
     });
   }
@@ -748,6 +800,8 @@ export function generateStudyPlan({
   assignments = [],
   exams = [],
   availability = [],
+  timetable = [],
+  transitionBufferMinutes = DEFAULT_TRANSITION_BUFFER_MINUTES,
   syllabusTopics = [],
   existingPlan = [],
   preserveCompleted = true,
@@ -761,8 +815,16 @@ export function generateStudyPlan({
       plan: [],
       insights: null,
       errors: ['No weekly availability configured. Please add at least one availability window.'],
+      timetableConflicts: [],
     };
   }
+
+  // Detect any direct conflicts between user availability windows and scheduled classes
+  const timetableConflicts = detectAvailabilityConflicts(
+    timetable,
+    availability,
+    transitionBufferMinutes
+  );
 
   // Adaptive pace multiplier (1.0x to 1.5x)
   const paceMultiplier = Math.max(1.0, Math.min(1.5, adaptiveSignals?.paceMultiplier || 1.0));
@@ -788,6 +850,7 @@ export function generateStudyPlan({
       plan: preservedCompletedSessions,
       insights: null,
       errors: ['No courses, pending assignments, exams, or syllabus topics found to plan for.'],
+      timetableConflicts,
     };
   }
 
@@ -797,13 +860,20 @@ export function generateStudyPlan({
     .sort();
 
   const latestDeadline = validDates[validDates.length - 1] || null;
-  const slots = buildPlanningSlots(availability, latestDeadline, startDate);
+  const slots = buildPlanningSlots(
+    availability,
+    latestDeadline,
+    startDate,
+    timetable,
+    transitionBufferMinutes
+  );
 
   if (slots.length === 0) {
     return {
       plan: preservedCompletedSessions,
       insights: null,
       errors: ['No usable study periods between 06:00 and 22:00 within the planning horizon.'],
+      timetableConflicts,
     };
   }
 
@@ -855,11 +925,48 @@ export function generateStudyPlan({
 
       if (eligibleTasks.length === 0) break;
 
-      // Sort eligible tasks by current dynamic score on this date
+      // Check for scheduled classes for courses on this day
+      const dayClasses = (timetable || []).filter(
+        (t) => t.dayOfWeek?.toLowerCase() === slot.day?.toLowerCase()
+      );
+
+      // Sort eligible tasks by current dynamic score on this date with pre/post lecture bonuses
       eligibleTasks.sort((a, b) => {
         const countA = dailyTaskCount[dateKey][a.id] || 0;
         const countB = dailyTaskCount[dateKey][b.id] || 0;
-        return getTaskScore(b, sessionDate, countB) - getTaskScore(a, sessionDate, countA);
+        let scoreA = getTaskScore(a, sessionDate, countA);
+        let scoreB = getTaskScore(b, sessionDate, countB);
+
+        // Pre-lecture & post-lecture boosts
+        const classA = dayClasses.find(
+          (c) =>
+            normalizeCourseCode(c.courseCode) === normalizeCourseCode(a.course) ||
+            (a.course && c.courseName?.toLowerCase().includes(a.course.toLowerCase()))
+        );
+        if (classA) {
+          const classStartMin = timeToMinutes(classA.startTime);
+          if (currentTime + MIN_SESSION_MINUTES <= classStartMin) {
+            scoreA += 5.0; // Pre-lecture prep bonus
+          } else if (currentTime >= timeToMinutes(classA.endTime)) {
+            scoreA += 3.0; // Post-lecture consolidation bonus
+          }
+        }
+
+        const classB = dayClasses.find(
+          (c) =>
+            normalizeCourseCode(c.courseCode) === normalizeCourseCode(b.course) ||
+            (b.course && c.courseName?.toLowerCase().includes(b.course.toLowerCase()))
+        );
+        if (classB) {
+          const classStartMin = timeToMinutes(classB.startTime);
+          if (currentTime + MIN_SESSION_MINUTES <= classStartMin) {
+            scoreB += 5.0;
+          } else if (currentTime >= timeToMinutes(classB.endTime)) {
+            scoreB += 3.0;
+          }
+        }
+
+        return scoreB - scoreA;
       });
 
       const chosenTask = eligibleTasks[0];
@@ -901,6 +1008,25 @@ export function generateStudyPlan({
           ? `Session #${chosenTask.sessionsScheduled + 1} for this topic (distributed across days to promote spaced learning).`
           : 'First dedicated study block scheduled for this topic.',
       ];
+
+      // Check if this task was scheduled as pre-lecture prep or post-lecture consolidation
+      const lectureOnDay = dayClasses.find(
+        (c) =>
+          normalizeCourseCode(c.courseCode) === normalizeCourseCode(chosenTask.course) ||
+          (chosenTask.course && c.courseName?.toLowerCase().includes(chosenTask.course.toLowerCase()))
+      );
+      if (lectureOnDay) {
+        const classStartMin = timeToMinutes(lectureOnDay.startTime);
+        if (sessionEnd <= classStartMin) {
+          explanation.unshift(
+            `🎒 Pre-lecture prep: scheduled before your ${chosenTask.course} ${lectureOnDay.activityType} (${lectureOnDay.startTime}) to review relevant concepts.`
+          );
+        } else if (sessionStart >= timeToMinutes(lectureOnDay.endTime)) {
+          explanation.unshift(
+            `🧠 Post-lecture consolidation: scheduled after your ${chosenTask.course} class to solidify key takeaways.`
+          );
+        }
+      }
 
       const recommendation =
         chosenTask.isEmergencyMode
@@ -1026,9 +1152,12 @@ export function generateStudyPlan({
     hasImpossibleSchedule: unscheduledTasks.length > 0,
     emergencyModeActive: emergencyExamMode,
     adaptivePaceApplied: paceMultiplier,
+    timetableConflicts,
     recommendation:
       unscheduledTasks.length === 0
-        ? 'All planned workload successfully fitted into your availability before deadlines.'
+        ? timetableConflicts.length > 0
+          ? `All planned workload fitted before deadlines. Notice: ${timetableConflicts.length} study slot(s) conflicted with scheduled classes and were automatically buffered around them.`
+          : 'All planned workload successfully fitted into your availability before deadlines.'
         : `Warning: ${unscheduledTasks.length} task(s) exceed available hours before deadline. Add availability or reduce scope.`,
   };
 
@@ -1036,5 +1165,6 @@ export function generateStudyPlan({
     plan: combinedPlan,
     insights,
     errors: [],
+    timetableConflicts,
   };
 }

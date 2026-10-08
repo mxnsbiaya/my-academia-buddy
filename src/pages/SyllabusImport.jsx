@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/useApp';
 import { extractTextFromPdf, isScannedPdf } from '../services/pdfExtractor';
 import { parseSyllabusDocument } from '../services/syllabusParser';
+import { computeContentHash, detectSyllabusDuplicate } from '../services/duplicateDetector';
 import { SAMPLE_SYLLABI_PACK } from '../data/sampleSyllabi';
 import { Badge } from '../components/Badge';
+import { Modal } from '../components/Modal';
 
 const PRESET_COURSE_COLORS = [
   '#3b82f6', // Blue
@@ -17,7 +19,14 @@ const PRESET_COURSE_COLORS = [
 
 export function SyllabusImport() {
   const navigate = useNavigate();
-  const { importSemesterFromSyllabi, addToast } = useApp();
+  const {
+    courses,
+    syllabusTopics,
+    assignments,
+    exams,
+    importSemesterFromSyllabi,
+    addToast,
+  } = useApp();
 
   const fileInputRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -26,6 +35,10 @@ export function SyllabusImport() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   const [replaceExisting, setReplaceExisting] = useState(false);
+
+  // Duplicate Syllabus Dialog & Diff View State
+  const [duplicateModalCourse, setDuplicateModalCourse] = useState(null);
+  const [showDiffModalCourse, setShowDiffModalCourse] = useState(null);
 
   // Direct Text Paste Mode
   const [showPasteModal, setShowPasteModal] = useState(false);
@@ -120,6 +133,26 @@ export function SyllabusImport() {
           fallbackYear: new Date().getFullYear(),
         });
 
+        // Compute content hash (SHA-256)
+        const contentHash = await computeContentHash(isPdf ? fileObj : text);
+
+        // Detect potential duplicates or revised syllabus
+        const dupReport = detectSyllabusDuplicate({
+          incomingCourse: {
+            ...parsedResult.course,
+            topics: parsedResult.topics,
+            assignments: parsedResult.assignments,
+            exams: parsedResult.exams,
+          },
+          existingCourses: courses,
+          fileHash: contentHash,
+          existingCollections: {
+            topics: syllabusTopics,
+            assignments,
+            exams,
+          },
+        });
+
         setUploadedFiles((prev) =>
           prev.map((f) =>
             f.id === fileId
@@ -128,7 +161,9 @@ export function SyllabusImport() {
                   status: 'ready',
                   pageCount,
                   courseName: parsedResult.course.name,
-                  progressText: 'Extraction complete',
+                  progressText: dupReport.isDuplicate
+                    ? `Duplicate detected: ${dupReport.type}`
+                    : 'Extraction complete',
                 }
               : f
           )
@@ -138,6 +173,9 @@ export function SyllabusImport() {
           fileId,
           fileName,
           pageCount,
+          contentHash,
+          duplicateReport: dupReport,
+          importStrategy: dupReport.isDuplicate ? 'merge' : 'new',
           ...parsedResult.course,
           topics: parsedResult.topics,
           assignments: parsedResult.assignments,
@@ -158,7 +196,7 @@ export function SyllabusImport() {
         return null;
       }
     },
-    [addToast]
+    [courses, syllabusTopics, assignments, exams, addToast]
   );
 
   /**
@@ -193,11 +231,23 @@ export function SyllabusImport() {
       if (newParsedCourses.length > 0) {
         setImportedCourses((prev) => [...prev, ...newParsedCourses]);
         setSelectedCourseIndex(importedCourses.length);
-        addToast(
-          `Successfully extracted ${newParsedCourses.length} course(s)! Review and confirm below.`,
-          'success',
-          5000
-        );
+
+        // Check if any incoming course is a duplicate
+        const duplicateCourse = newParsedCourses.find((c) => c.duplicateReport?.isDuplicate);
+        if (duplicateCourse) {
+          setDuplicateModalCourse(duplicateCourse);
+          addToast(
+            `⚠️ Duplicate or revised syllabus detected for "${duplicateCourse.name}". Choose whether to Merge, Update, or Cancel.`,
+            'warning',
+            7000
+          );
+        } else {
+          addToast(
+            `Successfully extracted ${newParsedCourses.length} course(s)! Review and confirm below.`,
+            'success',
+            5000
+          );
+        }
       }
 
       setIsProcessing(false);
@@ -769,6 +819,21 @@ export function SyllabusImport() {
                     }}
                   />
                   <span>{course.name || `Course ${idx + 1}`}</span>
+                  {course.duplicateReport?.isDuplicate && (
+                    <span
+                      title={`Duplicate / Revision: ${course.duplicateReport.reason}`}
+                      style={{
+                        fontSize: '10px',
+                        padding: '1px 5px',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                        color: 'var(--warning)',
+                        fontWeight: 700,
+                      }}
+                    >
+                      ⚠️ {course.importStrategy?.toUpperCase() || 'MERGE'}
+                    </span>
+                  )}
                   <span
                     style={{
                       fontSize: '11px',
@@ -801,6 +866,94 @@ export function SyllabusImport() {
 
           {activeCourse && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Duplicate or Revised Syllabus Banner */}
+              {activeCourse.duplicateReport?.isDuplicate && (
+                <div
+                  style={{
+                    padding: '16px 20px',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.35)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '24px' }}>⚠️</span>
+                      <div>
+                        <strong style={{ color: 'var(--warning)', fontSize: '15px' }}>
+                          Duplicate or Revised Syllabus Detected: {activeCourse.name}
+                        </strong>
+                        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          {activeCourse.duplicateReport.reason}
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        padding: '4px 10px',
+                        borderRadius: '12px',
+                        backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                        color: 'var(--warning)',
+                      }}
+                    >
+                      Active Choice: {activeCourse.importStrategy?.toUpperCase() || 'MERGE'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                      onClick={() => setShowDiffModalCourse(activeCourse)}
+                    >
+                      🔍 Review Differences
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`btn ${activeCourse.importStrategy === 'merge' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                      onClick={() => updateActiveCourse('importStrategy', 'merge')}
+                    >
+                      ✨ Merge Newly Discovered Info (Recommended)
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`btn ${activeCourse.importStrategy === 'update' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                      onClick={() => updateActiveCourse('importStrategy', 'update')}
+                    >
+                      🔄 Update Course Metadata
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '12px', padding: '6px 12px', color: 'var(--danger)' }}
+                      onClick={() => removeImportedCourse(selectedCourseIndex)}
+                    >
+                      ✕ Cancel Import
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Course Meta Banner */}
               <div
                 style={{
@@ -1363,7 +1516,7 @@ export function SyllabusImport() {
                         <div
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: '1.4fr 1fr 1fr',
+                            gridTemplateColumns: '1.2fr 1fr 1fr 1fr',
                             gap: '8px',
                             alignItems: 'center',
                           }}
@@ -1383,6 +1536,26 @@ export function SyllabusImport() {
                               className="form-input"
                               value={asg.dueDate || ''}
                               onChange={(e) => updateAssignment(aIdx, 'dueDate', e.target.value)}
+                              style={{ width: '100%', fontSize: '12px' }}
+                            />
+                          </div>
+
+                          <div>
+                            <label
+                              style={{
+                                fontSize: '11px',
+                                color: 'var(--text-muted)',
+                                display: 'block',
+                              }}
+                            >
+                              Due Time
+                            </label>
+                            <input
+                              type="text"
+                              className="form-input"
+                              value={asg.dueTime || '23:59'}
+                              onChange={(e) => updateAssignment(aIdx, 'dueTime', e.target.value)}
+                              placeholder="23:59"
                               style={{ width: '100%', fontSize: '12px' }}
                             />
                           </div>
@@ -1432,17 +1605,22 @@ export function SyllabusImport() {
                           </div>
                         </div>
 
-                        {asg.isYearEstimated && (
+                        {asg.needsReview && (
                           <div
                             style={{
                               fontSize: '11px',
                               color: 'var(--warning)',
+                              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                              border: '1px solid rgba(245, 158, 11, 0.3)',
+                              borderRadius: '6px',
+                              padding: '5px 8px',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
+                              gap: '6px',
                             }}
                           >
-                            <span>⚠️</span> Syllabus did not specify year — please confirm due date.
+                            <span>⚠️</span> <strong>Needs Student Review:</strong>{' '}
+                            {asg.reviewReason || 'Please verify due date and time.'}
                           </div>
                         )}
                       </div>
@@ -1530,7 +1708,7 @@ export function SyllabusImport() {
                         <div
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: '1.4fr 1.2fr 1fr',
+                            gridTemplateColumns: '1.2fr 1fr 1.2fr 0.8fr',
                             gap: '8px',
                             alignItems: 'center',
                           }}
@@ -1562,7 +1740,27 @@ export function SyllabusImport() {
                                 display: 'block',
                               }}
                             >
-                              Location
+                              Exam Time
+                            </label>
+                            <input
+                              type="text"
+                              className="form-input"
+                              value={exam.time || ''}
+                              onChange={(e) => updateExam(eIdx, 'time', e.target.value)}
+                              placeholder="e.g. 19:00 - 22:00"
+                              style={{ width: '100%', fontSize: '12px' }}
+                            />
+                          </div>
+
+                          <div>
+                            <label
+                              style={{
+                                fontSize: '11px',
+                                color: 'var(--text-muted)',
+                                display: 'block',
+                              }}
+                            >
+                              Location / Room
                             </label>
                             <input
                               type="text"
@@ -1597,17 +1795,22 @@ export function SyllabusImport() {
                           </div>
                         </div>
 
-                        {exam.isYearEstimated && (
+                        {exam.needsReview && (
                           <div
                             style={{
                               fontSize: '11px',
                               color: 'var(--warning)',
+                              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                              border: '1px solid rgba(245, 158, 11, 0.3)',
+                              borderRadius: '6px',
+                              padding: '5px 8px',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
+                              gap: '6px',
                             }}
                           >
-                            <span>⚠️</span> Syllabus did not specify year — please confirm exam date.
+                            <span>⚠️</span> <strong>Needs Student Review:</strong>{' '}
+                            {exam.reviewReason || 'Please verify exam date, time, and location.'}
                           </div>
                         )}
                       </div>
@@ -1785,6 +1988,268 @@ export function SyllabusImport() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Duplicate / Revision Confirmation Modal */}
+      {duplicateModalCourse && (
+        <Modal
+          isOpen={Boolean(duplicateModalCourse)}
+          onClose={() => setDuplicateModalCourse(null)}
+          title={`Duplicate Syllabus Detected: ${duplicateModalCourse.name}`}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 14px',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                borderRadius: '10px',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+              }}
+            >
+              <span style={{ fontSize: '28px' }}>⚠️</span>
+              <div>
+                <strong>{duplicateModalCourse.duplicateReport?.reason}</strong>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  We protect your academic data: My Academia Buddy will never silently overwrite your completed assignments, topic mastery, or student progress.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '10px' }}>
+                How would you like to handle this import?
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div
+                  onClick={() => {
+                    updateActiveCourse('importStrategy', 'merge');
+                    setDuplicateModalCourse(null);
+                    addToast('Selected: Merge newly discovered info into existing course.', 'success');
+                  }}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid var(--accent-cyan)',
+                    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <strong style={{ color: 'var(--accent-cyan)' }}>
+                    ✨ Merge Newly Discovered Information (Recommended)
+                  </strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    Appends newly found topics, assignments, and exams while keeping your existing grades, notes, and completed tasks 100% intact.
+                  </p>
+                </div>
+
+                <div
+                  onClick={() => {
+                    updateActiveCourse('importStrategy', 'update');
+                    setDuplicateModalCourse(null);
+                    addToast('Selected: Update course metadata and schedule.', 'info');
+                  }}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border-default)',
+                    backgroundColor: 'var(--bg-card)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <strong>🔄 Update Existing Course</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    Refreshes course schedule and instructor information without altering your study progress.
+                  </p>
+                </div>
+
+                <div
+                  onClick={() => {
+                    setShowDiffModalCourse(duplicateModalCourse);
+                    setDuplicateModalCourse(null);
+                  }}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border-default)',
+                    backgroundColor: 'var(--bg-card)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <strong>🔍 Review Differences First</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    Compare new deliverables and lecture topics side-by-side with your existing syllabus before deciding.
+                  </p>
+                </div>
+
+                <div
+                  onClick={() => {
+                    removeImportedCourse(
+                      importedCourses.findIndex((c) => c.fileId === duplicateModalCourse.fileId)
+                    );
+                    setDuplicateModalCourse(null);
+                    addToast('Cancelled import for duplicate syllabus.', 'info');
+                  }}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <strong style={{ color: 'var(--danger)' }}>✕ Cancel Import</strong>
+                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    Discard this document and keep your existing course records unchanged.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Diff Viewer Modal */}
+      {showDiffModalCourse && (
+        <Modal
+          isOpen={Boolean(showDiffModalCourse)}
+          onClose={() => setShowDiffModalCourse(null)}
+          title={`Syllabus Differences: ${showDiffModalCourse.name}`}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', textAlign: 'center' }}>
+              <div style={{ padding: '10px', backgroundColor: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                  {showDiffModalCourse.duplicateReport?.diff?.newTopics?.length || 0}
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>New Topics</div>
+              </div>
+              <div style={{ padding: '10px', backgroundColor: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                  {showDiffModalCourse.duplicateReport?.diff?.newAssignments?.length || 0}
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>New Assignments</div>
+              </div>
+              <div style={{ padding: '10px', backgroundColor: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                  {showDiffModalCourse.duplicateReport?.diff?.newExams?.length || 0}
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>New Exams</div>
+              </div>
+            </div>
+
+            {showDiffModalCourse.duplicateReport?.diff?.preservedStudentTasks > 0 && (
+              <div
+                style={{
+                  padding: '8px 12px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: 'var(--success)',
+                }}
+              >
+                🛡️ <strong>Data Protected:</strong> {showDiffModalCourse.duplicateReport.diff.preservedStudentTasks} completed assignment(s) will be strictly preserved.
+              </div>
+            )}
+
+            {/* New Deliverables List */}
+            <div>
+              <h4
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--text-muted)',
+                  textTransform: 'uppercase',
+                  marginBottom: '8px',
+                }}
+              >
+                Newly Discovered Deliverables
+              </h4>
+              <div
+                style={{
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+              >
+                {(showDiffModalCourse.duplicateReport?.diff?.newAssignments || []).map((a, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: '8px 10px',
+                      backgroundColor: 'var(--bg-card)',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      border: '1px solid var(--border-subtle)',
+                    }}
+                  >
+                    <span>📝 {a.title}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      {a.dueDate || 'No date'} • {a.weightPercent ? `${a.weightPercent}%` : ''}
+                    </span>
+                  </div>
+                ))}
+                {(showDiffModalCourse.duplicateReport?.diff?.newExams || []).map((e, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: '8px 10px',
+                      backgroundColor: 'var(--bg-card)',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      border: '1px solid var(--border-subtle)',
+                    }}
+                  >
+                    <span>📅 {e.title}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      {e.date || 'No date'} • {e.weightPercent ? `${e.weightPercent}%` : ''}
+                    </span>
+                  </div>
+                ))}
+                {(showDiffModalCourse.duplicateReport?.diff?.newAssignments?.length === 0 &&
+                  showDiffModalCourse.duplicateReport?.diff?.newExams?.length === 0) && (
+                  <div style={{ fontSize: '13px', color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px' }}>
+                    No new assignments or exams found in this document.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowDiffModalCourse(null)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  updateActiveCourse('importStrategy', 'merge');
+                  setShowDiffModalCourse(null);
+                  addToast('Selected: Merge newly discovered info into existing course.', 'info');
+                }}
+              >
+                Select "Merge" & Continue
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

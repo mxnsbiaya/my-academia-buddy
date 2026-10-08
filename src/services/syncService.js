@@ -128,6 +128,7 @@ export const ENTITY_TABLE_MAP = {
   studyPlan: 'study_sessions',
   studyInsights: 'study_insights',
   studentProfile: 'profiles',
+  timetable: 'timetable_entries',
 };
 
 /**
@@ -294,6 +295,25 @@ export function toDatabaseRow(entity, item, userId) {
         client_updated_at: clientUpdatedAt,
       };
 
+    case 'timetable':
+      return {
+        user_id: userId,
+        client_id: String(item.id),
+        course_code: item.courseCode || '',
+        course_name: item.courseName || '',
+        section: item.section || '',
+        activity_type: item.activityType || 'lecture',
+        day_of_week: item.dayOfWeek || 'Monday',
+        start_time: item.startTime,
+        end_time: item.endTime,
+        location: item.location || '',
+        instructor: item.instructor || '',
+        term: item.term || 'Fall 2026',
+        color: item.color || '#3b82f6',
+        version,
+        client_updated_at: clientUpdatedAt,
+      };
+
     default:
       throw new Error(`[syncService] Unknown entity type "${entity}"`);
   }
@@ -453,6 +473,24 @@ export function fromDatabaseRow(entity, row) {
         client_updated_at: row.client_updated_at || row.updated_at,
       };
 
+    case 'timetable':
+      return {
+        id: row.client_id,
+        courseCode: row.course_code,
+        courseName: row.course_name,
+        section: row.section || '',
+        activityType: row.activity_type || 'lecture',
+        dayOfWeek: row.day_of_week,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        location: row.location || '',
+        instructor: row.instructor || '',
+        term: row.term || 'Fall 2026',
+        color: row.color || '#3b82f6',
+        version: row.version || 1,
+        client_updated_at: row.client_updated_at || row.updated_at,
+      };
+
     default:
       return row;
   }
@@ -605,6 +643,7 @@ export async function pullCloudData(userId) {
       studyPlanRes,
       insightsRes,
       profileRes,
+      timetableRes,
     ] = await Promise.all([
       supabase.from('courses').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
       supabase.from('syllabus_topics').select('*').eq('user_id', userId).order('week_number', { ascending: true }),
@@ -616,6 +655,7 @@ export async function pullCloudData(userId) {
       supabase.from('study_sessions').select('*').eq('user_id', userId),
       supabase.from('study_insights').select('*').eq('user_id', userId).maybeSingle(),
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      supabase.from('timetable_entries').select('*').eq('user_id', userId).order('day_of_week', { ascending: true }),
     ]);
 
     const result = {
@@ -629,6 +669,7 @@ export async function pullCloudData(userId) {
       studyPlan: (studyPlanRes.data || []).map((r) => fromDatabaseRow('studyPlan', r)),
       studyInsights: insightsRes.data ? fromDatabaseRow('studyInsights', insightsRes.data) : null,
       studentProfile: profileRes.data ? fromDatabaseRow('studentProfile', profileRes.data) : null,
+      timetable: (timetableRes?.data || []).map((r) => fromDatabaseRow('timetable', r)),
     };
 
     safeSetItem(`${SYNC_LAST_PULL_KEY_PREFIX}${userId}`, new Date().toISOString());

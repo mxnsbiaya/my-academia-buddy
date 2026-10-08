@@ -177,6 +177,39 @@ export function generateWeeklyCheckInQuestions(arg1 = [], arg2 = [], arg3 = []) 
     });
   });
 
+  // Fallback: If no candidate topics exist across courses, generate course-level questions
+  if (questions.length === 0) {
+    courses.forEach((c) => {
+      questions.push({
+        id: `q-course-progress-${c.id || c.name}`,
+        courseName: c.name,
+        topicId: null,
+        topicTitle: 'Course Attendance & Concepts',
+        question: `Did you attend classes and keep up with ${c.name} this week?`,
+        questionText: `Did you attend classes and keep up with ${c.name} this week?`,
+        type: 'topic_lecture',
+        field: 'lecture',
+        options: [
+          CHECK_IN_ANSWERS.COMPLETED,
+          CHECK_IN_ANSWERS.PARTIALLY_COMPLETED,
+          CHECK_IN_ANSWERS.NOT_STARTED,
+          CHECK_IN_ANSWERS.SKIPPED,
+        ],
+      });
+      questions.push({
+        id: `q-course-conf-${c.id || c.name}`,
+        courseName: c.name,
+        topicId: null,
+        topicTitle: 'Confidence',
+        question: `How confident do you currently feel with the material in ${c.name}?`,
+        questionText: `How confident do you currently feel with the material in ${c.name}?`,
+        type: 'confidence',
+        field: 'confidence',
+        options: [1, 2, 3, 4, 5],
+      });
+    });
+  }
+
   // Always append commitments / schedule question
   const commitQ = 'Do you have any new work shifts, travel, or new commitments coming up next week?';
   questions.push({
@@ -191,6 +224,109 @@ export function generateWeeklyCheckInQuestions(arg1 = [], arg2 = [], arg3 = []) 
   });
 
   return questions;
+}
+
+/**
+ * Generates the rich 5-stage interactive check-in flow payload
+ * Used by CheckInModal for step-by-step guidance
+ */
+export function generateStructuredCheckInFlow({
+  courses = [],
+  syllabusTopics = [],
+  assignments = [],
+  exams = [],
+  studyPlan = [],
+} = {}) {
+  // Step 1: Attendance list
+  const attendanceItems = courses.map((c) => ({
+    courseId: c.id,
+    courseName: c.name,
+    schedule: c.schedule || 'Flexible schedule',
+    color: c.color,
+  }));
+
+  // Step 2: Topics for comprehension and difficulty
+  const courseTopicGroups = courses.map((c) => {
+    const cTopics = syllabusTopics.filter(
+      (t) => t.courseId === c.id || t.courseName === c.name
+    );
+    return {
+      courseId: c.id,
+      courseName: c.name,
+      color: c.color,
+      topics: cTopics.slice(0, 4), // focal topics
+    };
+  });
+
+  // Step 3: Planned study sessions
+  const recentSessions = (studyPlan || []).slice(0, 6);
+
+  // Step 4: Upcoming deliverables (next 14 days)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const twoWeeksLater = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+  const upcomingDeliverables = [
+    ...assignments.map((a) => ({ ...a, kind: 'assignment' })),
+    ...exams.map((e) => ({ ...e, kind: 'exam', dueDate: e.date })),
+  ]
+    .filter((item) => {
+      if (!item.dueDate) return false;
+      const d = new Date(`${item.dueDate}T23:59:59`);
+      return d >= today && d <= twoWeeksLater;
+    })
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+    .slice(0, 6);
+
+  return {
+    step1_attendance: attendanceItems,
+    step2_topics: courseTopicGroups,
+    step3_sessions: recentSessions,
+    step4_deliverables: upcomingDeliverables,
+    step5_pacing: courses.map((c) => ({
+      courseId: c.id,
+      courseName: c.name,
+      color: c.color,
+    })),
+  };
+}
+
+/**
+ * Generates clear, friendly explanation of study plan adaptations after a check-in
+ */
+export function explainCheckInAdaptations({
+  recalibratedSignals = {},
+  adaptedTopicCount = 0,
+  planUpdated = false,
+  difficultTopicCount = 0,
+  missedSessionCount = 0,
+} = {}) {
+  const points = [];
+
+  if (difficultTopicCount > 0) {
+    points.push(`Added intensive review focus for ${difficultTopicCount} concept(s) flagged as challenging.`);
+  } else if (adaptedTopicCount > 0) {
+    points.push(`Updated mastery progress for ${adaptedTopicCount} course topic(s).`);
+  }
+
+  if (recalibratedSignals.paceMultiplier && recalibratedSignals.paceMultiplier > 1.0) {
+    const bufferPct = Math.round((recalibratedSignals.paceMultiplier - 1.0) * 100);
+    points.push(`Adjusted study buffer by +${bufferPct}% to prevent academic delays and ease weekly workload.`);
+  } else {
+    points.push('Maintaining steady standard pace based on consistent study progress.');
+  }
+
+  if (missedSessionCount > 0) {
+    points.push(`Rescheduled ${missedSessionCount} missed session(s) into realistic upcoming study windows.`);
+  }
+
+  if (planUpdated) {
+    points.push('Recalibrated your adaptive weekly calendar with prioritized milestones before deadlines.');
+  }
+
+  points.push('All previously completed study sessions and notes were preserved.');
+
+  return points;
 }
 
 /**

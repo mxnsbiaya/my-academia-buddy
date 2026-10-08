@@ -37,6 +37,7 @@ export function getGuestInventorySummary() {
     examsCount: snapshot.exams?.length || 0,
     checkInsCount: snapshot.checkIns?.length || 0,
     availabilityCount: snapshot.availability?.length || 0,
+    timetableCount: snapshot.timetable?.length || 0,
     hasData: hasGuestData(),
   };
 }
@@ -63,6 +64,7 @@ export async function executeMigration(userId) {
     safeSetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, guestData.studentProfile, userId);
     safeSetScopedItem(STORAGE_KEYS.STUDY_PLAN, guestData.studyPlan, userId);
     safeSetScopedItem(STORAGE_KEYS.STUDY_INSIGHTS, guestData.studyInsights, userId);
+    safeSetScopedItem(STORAGE_KEYS.TIMETABLE, guestData.timetable, userId);
 
     safeSetItem(`${MIGRATION_FLAG_PREFIX}${userId}`, true);
 
@@ -190,6 +192,15 @@ export async function executeMigration(userId) {
     if (planErr) console.warn('[migrationService] Study sessions sync note:', planErr);
   }
 
+  // 4i. Timetable Entries
+  if (guestData.timetable && guestData.timetable.length > 0) {
+    const ttRows = guestData.timetable.map((tt) => toDatabaseRow('timetable', tt, userId));
+    const { error: ttErr } = await supabase
+      .from('timetable_entries')
+      .upsert(ttRows, { onConflict: 'user_id, client_id' });
+    if (ttErr) console.warn('[migrationService] Timetable sync note:', ttErr);
+  }
+
   // Step 5: VERIFICATION — Confirm cloud records exist
   const { count: verifiedCourseCount, error: verErr } = await supabase
     .from('courses')
@@ -214,6 +225,7 @@ export async function executeMigration(userId) {
   safeSetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, guestData.studentProfile, userId);
   safeSetScopedItem(STORAGE_KEYS.STUDY_PLAN, guestData.studyPlan, userId);
   safeSetScopedItem(STORAGE_KEYS.STUDY_INSIGHTS, guestData.studyInsights, userId);
+  safeSetScopedItem(STORAGE_KEYS.TIMETABLE, guestData.timetable, userId);
 
   return {
     success: true,

@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useApp } from '../context/useApp';
 import { useAuth } from '../context/useAuth';
+import { t } from '../services/i18n';
 
 export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
   const { user } = useAuth();
@@ -10,6 +11,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
     exams,
     studyPlan,
     studentProfile,
+    timetable = [],
     checkIns = [],
     openCheckInModal,
     openProfileModal,
@@ -60,18 +62,18 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
 
           <NavLink to="/" end className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">🏠</span>
-            <span className="nav-label">Dashboard</span>
+            <span className="nav-label">{t('nav_dashboard')}</span>
           </NavLink>
 
           <NavLink to="/courses" className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">📚</span>
-            <span className="nav-label">Courses & Syllabus</span>
+            <span className="nav-label">{t('nav_courses')}</span>
             {courses.length > 0 && <span className="nav-counter">{courses.length}</span>}
           </NavLink>
 
           <NavLink to="/syllabus-import" className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">📑</span>
-            <span className="nav-label">Import Syllabus</span>
+            <span className="nav-label">{t('nav_syllabus_import')}</span>
             <span className="nav-counter" style={{ backgroundColor: 'rgba(56, 189, 248, 0.2)', color: 'var(--accent-cyan)' }}>
               Auto
             </span>
@@ -79,7 +81,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
 
           <NavLink to="/assignments" className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">📝</span>
-            <span className="nav-label">Assignments</span>
+            <span className="nav-label">{t('nav_assignments')}</span>
             {pendingAssignmentsCount > 0 && (
               <span className="nav-counter counter-urgent">{pendingAssignmentsCount}</span>
             )}
@@ -87,15 +89,25 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
 
           <NavLink to="/exams" className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">📅</span>
-            <span className="nav-label">Exams</span>
+            <span className="nav-label">{t('nav_exams')}</span>
             {exams.length > 0 && <span className="nav-counter">{exams.length}</span>}
           </NavLink>
 
           <NavLink to="/study-planner" className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">✨</span>
-            <span className="nav-label">Adaptive Planner</span>
+            <span className="nav-label">{t('nav_study_planner')}</span>
             {taskSessionsCount > 0 && (
               <span className="nav-counter counter-accent">{taskSessionsCount}</span>
+            )}
+          </NavLink>
+
+          <NavLink to="/timetable" className={getLinkClass} onClick={onClose}>
+            <span className="nav-icon" aria-hidden="true">🗓️</span>
+            <span className="nav-label">{t('nav_timetable')}</span>
+            {timetable.length > 0 && (
+              <span className="nav-counter" style={{ backgroundColor: 'rgba(56, 189, 248, 0.2)', color: 'var(--accent-cyan)' }}>
+                {timetable.length}
+              </span>
             )}
           </NavLink>
 
@@ -110,7 +122,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
             }}
           >
             <span className="nav-icon" aria-hidden="true">🧭</span>
-            <span className="nav-label">Weekly Check-In</span>
+            <span className="nav-label">{t('nav_checkin')}</span>
             {!hasRecentCheckIn && (
               <span className="checkin-badge-pill">Due</span>
             )}
@@ -125,7 +137,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
             }}
           >
             <span className="nav-icon" aria-hidden="true">👤</span>
-            <span className="nav-label">Student Profile</span>
+            <span className="nav-label">{t('nav_profile')}</span>
           </button>
         </nav>
 
@@ -139,7 +151,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
             }}
           >
             <span aria-hidden="true">⚙️</span>
-            <span>Data & Backup</span>
+            <span>{t('nav_backup_restore')}</span>
           </button>
 
           <button
@@ -151,7 +163,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
             }}
           >
             <span aria-hidden="true">{user ? '🎓' : '🔑'}</span>
-            <span>{user ? 'Account & Cloud' : 'Sign In / Sync'}</span>
+            <span>{user ? t('nav_account_cloud') : t('nav_sign_in')}</span>
           </button>
 
           <div

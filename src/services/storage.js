@@ -19,6 +19,8 @@ export const STORAGE_KEYS = {
   SYLLABUS_TOPICS: 'syllabusTopics',
   CHECK_INS: 'checkIns',
   ADAPTIVE_SIGNALS: 'adaptiveSignals',
+  // Phase 4 — Timetable & Class Schedule
+  TIMETABLE: 'timetable',
 };
 
 /**
@@ -181,6 +183,7 @@ export function getGuestDataSnapshot() {
     syllabusTopics: safeGetScopedItem(STORAGE_KEYS.SYLLABUS_TOPICS, [], null),
     checkIns: safeGetScopedItem(STORAGE_KEYS.CHECK_INS, [], null),
     adaptiveSignals: safeGetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals(), null),
+    timetable: safeGetScopedItem(STORAGE_KEYS.TIMETABLE, [], null),
   };
 }
 
@@ -397,6 +400,8 @@ export function exportAllData() {
       syllabusTopics: safeGetItem(STORAGE_KEYS.SYLLABUS_TOPICS, []),
       checkIns: safeGetItem(STORAGE_KEYS.CHECK_INS, []),
       adaptiveSignals: safeGetItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals()),
+      // Phase 4 additions
+      timetable: safeGetItem(STORAGE_KEYS.TIMETABLE, []),
     },
   };
   return JSON.stringify(payload, null, 2);
@@ -425,6 +430,7 @@ export function importAllData(jsonSource) {
       syllabusTopics,
       checkIns,
       adaptiveSignals,
+      timetable,
     } = parsed.data;
 
     if (Array.isArray(courses)) safeSetItem(STORAGE_KEYS.COURSES, courses);
@@ -438,6 +444,7 @@ export function importAllData(jsonSource) {
     if (Array.isArray(syllabusTopics)) safeSetItem(STORAGE_KEYS.SYLLABUS_TOPICS, syllabusTopics);
     if (Array.isArray(checkIns)) safeSetItem(STORAGE_KEYS.CHECK_INS, checkIns);
     if (adaptiveSignals) safeSetItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, adaptiveSignals);
+    if (Array.isArray(timetable)) safeSetItem(STORAGE_KEYS.TIMETABLE, timetable);
 
     safeSetItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
     return { success: true, message: 'Data imported successfully!' };

@@ -15,6 +15,9 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
     adaptiveSignals,
     syncStatus,
     syncConflict,
+    language,
+    changeLanguage,
+    t,
   } = useApp();
 
   const urgentCount = useMemo(() => {
@@ -38,12 +41,12 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
   }, [assignments, exams]);
 
   const todayFormatted = useMemo(() => {
-    return new Date().toLocaleDateString(undefined, {
+    return new Date().toLocaleDateString(language === 'fr' ? 'fr-CA' : 'en-CA', {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
     });
-  }, []);
+  }, [language]);
 
   const hasRecentCheckIn = useMemo(() => {
     if (!checkIns || checkIns.length === 0) return false;
@@ -56,17 +59,17 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
   const syncStatusDetails = useMemo(() => {
     switch (syncStatus) {
       case 'synced':
-        return { label: 'Synced', icon: '🟢', className: 'sync-pill-synced', title: 'All academic data synced to cloud' };
+        return { label: t('nav_sync_synced'), icon: '🟢', className: 'sync-pill-synced', title: 'All academic data synced to cloud' };
       case 'syncing':
-        return { label: 'Syncing...', icon: '🟡', className: 'sync-pill-syncing', title: 'Saving changes to Supabase...' };
+        return { label: t('nav_sync_syncing'), icon: '🟡', className: 'sync-pill-syncing', title: 'Saving changes to Supabase...' };
       case 'offline':
-        return { label: 'Offline', icon: '⚪', className: 'sync-pill-offline', title: 'Working offline. Changes queued in local cache.' };
+        return { label: t('nav_sync_offline'), icon: '⚪', className: 'sync-pill-offline', title: 'Working offline. Changes queued in local cache.' };
       case 'conflict':
         return { label: 'Conflict', icon: '🔴', className: 'sync-pill-conflict', title: `Edit conflict detected: ${syncConflict?.entity || 'record'}. Retaining local version.` };
       default:
-        return { label: 'Local Only', icon: '💾', className: 'sync-pill-local', title: 'Saved locally in browser. Sign in to sync across devices.' };
+        return { label: t('nav_sync_local'), icon: '💾', className: 'sync-pill-local', title: 'Saved locally in browser. Sign in to sync across devices.' };
     }
-  }, [syncStatus, syncConflict]);
+  }, [syncStatus, syncConflict, t]);
 
   return (
     <header className="app-header">
@@ -88,14 +91,14 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
         {urgentCount > 0 && (
           <div className="header-alert-pill" title="Deadlines within 72 hours">
             <span className="pulse-dot" />
-            <span>{urgentCount} due soon</span>
+            <span>{t('header_due_soon', { count: urgentCount })}</span>
           </div>
         )}
 
         {adaptiveSignals?.paceMultiplier > 1.05 && (
           <div className="header-coach-pill" title="Adaptive Pace Buffer active">
             <span className="coach-dot">🛡️</span>
-            <span>+20% Buffer Active</span>
+            <span>{t('header_buffer_active')}</span>
           </div>
         )}
 
@@ -107,6 +110,29 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
       </div>
 
       <div className="header-right">
+        {/* Bilingual Language Switcher (EN / FR) */}
+        <div className="header-lang-switcher" role="group" aria-label="Language selector">
+          <button
+            type="button"
+            className={`lang-toggle-btn ${language === 'en' ? 'active' : ''}`}
+            onClick={() => changeLanguage('en')}
+            aria-label="Switch to English"
+            title="English"
+          >
+            EN
+          </button>
+          <span className="lang-toggle-separator">|</span>
+          <button
+            type="button"
+            className={`lang-toggle-btn ${language === 'fr' ? 'active' : ''}`}
+            onClick={() => changeLanguage('fr')}
+            aria-label="Passer au français"
+            title="Français"
+          >
+            FR
+          </button>
+        </div>
+
         {/* Weekly Check-In Quick Button */}
         <button
           type="button"
@@ -115,7 +141,7 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
           title="Take 2-minute weekly check-in"
         >
           <span aria-hidden="true">🧭</span>
-          <span className="header-btn-label">Weekly Check-In</span>
+          <span className="header-btn-label">{t('nav_checkin')}</span>
           {!hasRecentCheckIn && <span className="header-checkin-badge">Due</span>}
         </button>
 
@@ -128,7 +154,7 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
         >
           <span aria-hidden="true">👤</span>
           <span className="header-btn-label">
-            {studentProfile?.name ? studentProfile.name.split(' ')[0] : 'Profile'}
+            {studentProfile?.name ? studentProfile.name.split(' ')[0] : t('nav_profile')}
           </span>
         </button>
 
@@ -141,7 +167,7 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
         >
           <span aria-hidden="true">{user ? '🎓' : '🔑'}</span>
           <span className="header-btn-label">
-            {user ? (user.user_metadata?.full_name ? user.user_metadata.full_name.split(' ')[0] : user.email?.split('@')[0]) : 'Sign In'}
+            {user ? (user.user_metadata?.full_name ? user.user_metadata.full_name.split(' ')[0] : user.email?.split('@')[0]) : t('nav_sign_in')}
           </span>
         </button>
 
@@ -153,7 +179,7 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
           title="Backup and Restore Data"
         >
           <span aria-hidden="true">💾</span>
-          <span className="header-btn-label">Backup / Restore</span>
+          <span className="header-btn-label">{t('nav_backup_restore')}</span>
         </button>
       </div>
     </header>

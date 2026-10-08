@@ -326,6 +326,46 @@
   border-color: var(--border-hover);
 }
 
+/* Bilingual Language Switcher Pill */
+.header-lang-switcher {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 2px 5px;
+  gap: 3px;
+}
+
+.lang-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lang-toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.lang-toggle-btn.active {
+  background-color: var(--accent-blue);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.lang-toggle-separator {
+  color: var(--border-hover);
+  font-size: 11px;
+  opacity: 0.6;
+}
+
 /* ==========================================================================
    Page Headers & Common Containers
    ========================================================================== */
@@ -3637,4 +3677,152 @@
   justify-content: flex-end;
   gap: 10px;
   margin-top: 8px;
+}
+
+/* ==========================================================================
+   Academic Check-In Interactive Experience — Phase 4
+   ========================================================================== */
+.checkin-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 680px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.checkin-intro-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: var(--radius-md);
+  margin-bottom: 4px;
+}
+
+.checkin-coach-icon {
+  font-size: 26px;
+  flex-shrink: 0;
+}
+
+.checkin-question-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.checkin-question-card:hover {
+  border-color: var(--border-hover);
+}
+
+.question-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.question-tag {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent-cyan);
+  padding: 2px 8px;
+  background: rgba(56, 189, 248, 0.12);
+  border-radius: var(--radius-xs);
+}
+
+.question-number {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.question-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.checkin-options-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 600px) {
+  .checkin-options-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.btn-checkin-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-checkin-opt:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.btn-checkin-opt.opt-active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+  font-weight: 700;
+  box-shadow: 0 0 0 1px var(--accent-cyan);
+}
+
+.confidence-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.confidence-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-confidence {
+  padding: 6px 12px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-confidence:hover {
+  background: var(--bg-hover);
+}
+
+.btn-confidence.confidence-active {
+  background: var(--accent-cyan);
+  color: #000;
+  font-weight: 700;
+  border-color: var(--accent-cyan);
 }

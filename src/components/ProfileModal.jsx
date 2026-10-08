@@ -20,6 +20,9 @@ function ProfileForm({ studentProfile, onSave, onCancel }) {
   const [weeklyStudyGoalHours, setWeeklyStudyGoalHours] = useState(
     String(studentProfile?.weeklyStudyGoalHours ?? 18)
   );
+  const [preferredLanguage, setPreferredLanguage] = useState(
+    studentProfile?.preferredLanguage || 'en'
+  );
   const [academicGoal, setAcademicGoal] = useState(studentProfile?.academicGoal || '');
 
   const togglePeriod = (period) => {
@@ -35,6 +38,7 @@ function ProfileForm({ studentProfile, onSave, onCancel }) {
       semester: semester.trim(),
       organizationLevel,
       preferredStudyPeriods,
+      preferredLanguage,
       weeklyWorkHours: Number(weeklyWorkHours) || 0,
       workScheduleSummary: workScheduleSummary.trim(),
       weeklyStudyGoalHours: Number(weeklyStudyGoalHours) || 15,
@@ -91,6 +95,24 @@ function ProfileForm({ studentProfile, onSave, onCancel }) {
         </select>
         <span className="field-hint">
           This is used as an initial planning baseline and will adapt automatically to your real study habits.
+        </span>
+      </div>
+
+      <div className="form-group">
+        <label htmlFor="prof-language" className="form-label">
+          Preferred Language / Langue d’utilisation
+        </label>
+        <select
+          id="prof-language"
+          className="form-select"
+          value={preferredLanguage}
+          onChange={(e) => setPreferredLanguage(e.target.value)}
+        >
+          <option value="en">English (Anglais)</option>
+          <option value="fr">Français (French)</option>
+        </select>
+        <span className="field-hint">
+          Switch between English and French interface without losing data. Official course codes are never altered.
         </span>
       </div>
 

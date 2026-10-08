@@ -26,6 +26,8 @@ import {
   SYNC_STATUS,
 } from '../services/syncService';
 import { shouldPromptMigration } from '../services/migrationService';
+import { detectSyllabusDuplicate, mergeSyllabusCourse } from '../services/duplicateDetector';
+import { getLanguage, setLanguage, subscribeLanguage, t } from '../services/i18n';
 import { useAuth } from './useAuth';
 import { AppContext } from './AppContextDefinition';
 
@@ -66,6 +68,22 @@ export function AppProvider({ children }) {
     safeGetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals(), userId)
   );
   const [emergencyExamMode, setEmergencyExamMode] = useState(false);
+
+  // Phase 4 Timetable & Transition Buffer State
+  const [timetable, setTimetable] = useState(() => safeGetScopedItem(STORAGE_KEYS.TIMETABLE, [], userId));
+  const [transitionBufferMinutes, setTransitionBufferMinutes] = useState(15);
+  const [timetableConflicts, setTimetableConflicts] = useState([]);
+
+  // Bilingual Language State (Phase 4)
+  const [language, setLanguageState] = useState(() => {
+    return studentProfile?.preferredLanguage || getLanguage() || 'en';
+  });
+
+  useEffect(() => {
+    return subscribeLanguage((newLang) => {
+      setLanguageState(newLang);
+    });
+  }, []);
 
   // Sync status
   const [syncStatus, setSyncStatus] = useState(userId ? SYNC_STATUS.SYNCED : SYNC_STATUS.LOCAL_ONLY);
@@ -135,6 +153,7 @@ export function AppProvider({ children }) {
       setSyllabusTopics(safeGetScopedItem(STORAGE_KEYS.SYLLABUS_TOPICS, [], userId));
       setCheckIns(safeGetScopedItem(STORAGE_KEYS.CHECK_INS, [], userId));
       setAdaptiveSignals(safeGetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals(), userId));
+      setTimetable(safeGetScopedItem(STORAGE_KEYS.TIMETABLE, [], userId));
 
       if (userId) {
         // Detect if migration is needed
@@ -155,6 +174,7 @@ export function AppProvider({ children }) {
             if (cloudData.studentProfile) setStudentProfile(cloudData.studentProfile);
             if (cloudData.studyPlan?.length > 0) setStudyPlan(cloudData.studyPlan);
             if (cloudData.studyInsights) setInsights(cloudData.studyInsights);
+            if (cloudData.timetable?.length > 0) setTimetable(cloudData.timetable);
           }
         });
 
@@ -207,9 +227,17 @@ export function AppProvider({ children }) {
     safeSetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, adaptiveSignals, userId);
   }, [adaptiveSignals, userId]);
 
+  useEffect(() => {
+    safeSetScopedItem(STORAGE_KEYS.TIMETABLE, timetable, userId);
+  }, [timetable, userId]);
+
   // --- Student Profile Operations ---
   const updateStudentProfile = useCallback(
     (profileUpdates) => {
+      if (profileUpdates.preferredLanguage) {
+        setLanguage(profileUpdates.preferredLanguage);
+        setLanguageState(profileUpdates.preferredLanguage);
+      }
       setStudentProfile((prev) => {
         const next = ensureEntityMetadata({
           ...prev,
@@ -227,6 +255,16 @@ export function AppProvider({ children }) {
       addToast('Academic profile updated successfully.', 'success');
     },
     [userId, addToast]
+  );
+
+  const changeLanguage = useCallback(
+    (newLang) => {
+      if (newLang !== 'en' && newLang !== 'fr') return;
+      setLanguage(newLang);
+      setLanguageState(newLang);
+      updateStudentProfile({ preferredLanguage: newLang });
+    },
+    [updateStudentProfile]
   );
 
   // --- Course Operations ---
@@ -776,6 +814,111 @@ export function AppProvider({ children }) {
     [userId, addToast]
   );
 
+  // --- Timetable & Class Schedule Operations ---
+  const addTimetableEntry = useCallback(
+    (data) => {
+      const newEntry = ensureEntityMetadata({
+        id: `tt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        courseCode: data.courseCode?.trim() || 'GEN 1000',
+        courseName: data.courseName?.trim() || data.courseCode?.trim() || 'Course',
+        section: data.section?.trim() || '',
+        activityType: data.activityType || 'lecture',
+        dayOfWeek: data.dayOfWeek || 'Monday',
+        startTime: data.startTime || '10:00',
+        endTime: data.endTime || '11:20',
+        location: data.location?.trim() || '',
+        instructor: data.instructor?.trim() || '',
+        term: data.term || 'Fall 2026',
+        color: data.color || '#3b82f6',
+        createdAt: new Date().toISOString(),
+      });
+      setTimetable((prev) => [...prev, newEntry]);
+      enqueueMutation(userId, {
+        entity: 'timetable',
+        action: 'upsert',
+        clientId: newEntry.id,
+        data: newEntry,
+      });
+      addToast(`Class "${newEntry.courseCode}" added to timetable.`, 'success');
+      return newEntry;
+    },
+    [userId, addToast]
+  );
+
+  const updateTimetableEntry = useCallback(
+    (id, updatedData) => {
+      let updatedObj = null;
+      setTimetable((prev) =>
+        prev.map((item) => {
+          if (item.id === id) {
+            updatedObj = ensureEntityMetadata({
+              ...item,
+              ...updatedData,
+              version: (item.version || 1) + 1,
+            });
+            return updatedObj;
+          }
+          return item;
+        })
+      );
+      if (updatedObj) {
+        enqueueMutation(userId, {
+          entity: 'timetable',
+          action: 'upsert',
+          clientId: id,
+          data: updatedObj,
+        });
+        addToast('Timetable class updated.', 'success');
+      }
+    },
+    [userId, addToast]
+  );
+
+  const deleteTimetableEntry = useCallback(
+    (id) => {
+      setTimetable((prev) => prev.filter((item) => item.id !== id));
+      enqueueMutation(userId, {
+        entity: 'timetable',
+        action: 'delete',
+        clientId: id,
+      });
+      addToast('Timetable class removed.', 'info');
+    },
+    [userId, addToast]
+  );
+
+  const importTimetableEntries = useCallback(
+    (newEntries = [], replaceExisting = false) => {
+      if (replaceExisting) {
+        timetable.forEach((e) => {
+          enqueueMutation(userId, {
+            entity: 'timetable',
+            action: 'delete',
+            clientId: e.id,
+          });
+        });
+      }
+      const prepared = newEntries.map((e) =>
+        ensureEntityMetadata({
+          ...e,
+          id: e.id || `tt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          createdAt: new Date().toISOString(),
+        })
+      );
+      setTimetable((prev) => (replaceExisting ? prepared : [...prev, ...prepared]));
+      prepared.forEach((e) => {
+        enqueueMutation(userId, {
+          entity: 'timetable',
+          action: 'upsert',
+          clientId: e.id,
+          data: e,
+        });
+      });
+      addToast(`Imported ${prepared.length} class(es) into your timetable.`, 'success');
+    },
+    [timetable, userId, addToast]
+  );
+
   // --- Smart Study Planner Operations ---
   const handleGeneratePlan = useCallback(
     (options = { preserveCompleted: true }) => {
@@ -787,6 +930,8 @@ export function AppProvider({ children }) {
         assignments,
         exams,
         availability,
+        timetable,
+        transitionBufferMinutes,
         syllabusTopics,
         existingPlan: studyPlan,
         preserveCompleted: options.preserveCompleted,
@@ -803,6 +948,7 @@ export function AppProvider({ children }) {
       const planWithMeta = (result.plan || []).map(ensureEntityMetadata);
       setStudyPlan(planWithMeta);
       setInsights(result.insights);
+      setTimetableConflicts(result.timetableConflicts || []);
 
       if (userId) {
         planWithMeta.forEach((s) => {
@@ -825,6 +971,12 @@ export function AppProvider({ children }) {
 
       if (emergencyExamMode) {
         addToast('⚡ Emergency Exam Prep plan generated with intensive mock review blocks!', 'warning', 7000);
+      } else if (result.timetableConflicts && result.timetableConflicts.length > 0) {
+        addToast(
+          `Study plan calibrated! Notice: ${result.timetableConflicts.length} study slot(s) conflicted with scheduled classes and were automatically buffered around them.`,
+          'info',
+          7000
+        );
       } else if (result.insights?.hasImpossibleSchedule) {
         addToast(
           'Plan generated with warnings: some deliverables exceed your available study hours.',
@@ -835,13 +987,15 @@ export function AppProvider({ children }) {
         addToast('Adaptive study plan generated with concrete action steps!', 'success');
       }
 
-      return { success: true, plan: planWithMeta, insights: result.insights };
+      return { success: true, plan: planWithMeta, insights: result.insights, timetableConflicts: result.timetableConflicts };
     },
     [
       courses,
       assignments,
       exams,
       availability,
+      timetable,
+      transitionBufferMinutes,
       syllabusTopics,
       studyPlan,
       checkIns,
@@ -907,7 +1061,7 @@ export function AppProvider({ children }) {
     [addToast]
   );
 
-  // --- Intelligent Syllabus Import Semester Setup ---
+  // --- Intelligent Syllabus Import Semester Setup with Duplicate Protection & Merging ---
   const importSemesterFromSyllabi = useCallback(
     ({ courses: newCoursesList = [], replaceExisting = false }) => {
       let baseCourses = replaceExisting ? [] : [...courses];
@@ -916,110 +1070,206 @@ export function AppProvider({ children }) {
       let baseExams = replaceExisting ? [] : [...exams];
 
       let addedCourseCount = 0;
+      let updatedCourseCount = 0;
       let addedTopicCount = 0;
       let addedAssignmentCount = 0;
       let addedExamCount = 0;
 
       newCoursesList.forEach((imported, idx) => {
-        const courseId = Date.now() + idx + Math.floor(Math.random() * 1000);
-        const courseObj = ensureEntityMetadata({
-          id: courseId,
-          name: imported.name || imported.courseCode || `Course ${idx + 1}`,
-          instructor: imported.instructor || '',
-          schedule: imported.schedule || '',
-          credits: imported.credits || '3.0',
-          difficulty: imported.difficulty || 'Medium',
-          color: imported.color || IMPORT_PRESET_COLORS[idx % IMPORT_PRESET_COLORS.length],
-          createdAt: new Date().toISOString(),
-          gradingScheme: imported.gradingScheme || [],
-        });
-        baseCourses.push(courseObj);
-        enqueueMutation(userId, {
-          entity: 'courses',
-          action: 'upsert',
-          clientId: courseObj.id,
-          data: courseObj,
-        });
-        addedCourseCount++;
+        // Check if course already exists (exact hash match or normalized code/term match)
+        const dupCheck = !replaceExisting
+          ? detectSyllabusDuplicate({
+              incomingCourse: imported,
+              existingCourses: baseCourses,
+              fileHash: imported.contentHash || imported.syllabusFileHash,
+              existingCollections: {
+                topics: baseTopics,
+                assignments: baseAssignments,
+                exams: baseExams,
+              },
+            })
+          : { isDuplicate: false };
 
-        // Add weekly topics
-        if (imported.topics && imported.topics.length > 0) {
-          imported.topics.forEach((t, tIdx) => {
-            const topicObj = ensureEntityMetadata({
-              id: `topic-${Date.now()}-${idx}-${tIdx}`,
-              courseId: courseId,
-              courseName: courseObj.name,
-              weekNumber: Number(t.weekNumber) || tIdx + 1,
-              title: t.title?.trim() || `Week ${tIdx + 1} Lecture`,
-              description: t.description?.trim() || '',
-              requiredReadings: t.requiredReadings?.trim() || '',
-              practiceProblems: t.practiceProblems?.trim() || '',
-              estimatedHours: Number(t.estimatedHours) || 3.0,
-              prerequisiteTopicIds: [],
-              status: 'not_started',
-              confidence: 3,
-              lastUpdated: new Date().toISOString(),
-            });
-            baseTopics.push(topicObj);
-            enqueueMutation(userId, {
-              entity: 'syllabusTopics',
-              action: 'upsert',
-              clientId: topicObj.id,
-              data: topicObj,
-            });
-            addedTopicCount++;
-          });
+        const strategy = imported.importStrategy || (dupCheck.isDuplicate ? 'merge' : 'new');
+
+        if (dupCheck.isDuplicate && strategy === 'cancel') {
+          return; // Skipped by student
         }
 
-        // Add assignments
-        if (imported.assignments && imported.assignments.length > 0) {
-          imported.assignments.forEach((a, aIdx) => {
-            const asgObj = ensureEntityMetadata({
-              id: `asg-${Date.now()}-${idx}-${aIdx}`,
-              title: a.title?.trim() || `Assignment ${aIdx + 1}`,
-              course: courseObj.name,
-              dueDate: a.dueDate || '',
-              priority: a.priority || (a.weightPercent && a.weightPercent >= 15 ? 'High' : 'Medium'),
-              estimatedWorkload: a.estimatedWorkload || (a.weightPercent && a.weightPercent >= 15 ? 6 : 4),
-              weightPercent: a.weightPercent || null,
-              completed: false,
-              createdAt: new Date().toISOString(),
-            });
-            baseAssignments.push(asgObj);
-            enqueueMutation(userId, {
-              entity: 'assignments',
-              action: 'upsert',
-              clientId: asgObj.id,
-              data: asgObj,
-            });
-            addedAssignmentCount++;
+        if (dupCheck.isDuplicate && (strategy === 'merge' || strategy === 'update')) {
+          // Safe, non-destructive merge that preserves student progress and completed tasks
+          const mergeResult = mergeSyllabusCourse({
+            existingCourse: dupCheck.existingCourse,
+            incomingCourse: imported,
+            strategy,
+            existingTopics: baseTopics,
+            existingAssignments: baseAssignments,
+            existingExams: baseExams,
+            fileHash: imported.contentHash || imported.syllabusFileHash,
           });
-        }
 
-        // Add exams
-        if (imported.exams && imported.exams.length > 0) {
-          imported.exams.forEach((e, eIdx) => {
-            const examObj = ensureEntityMetadata({
-              id: `exam-${Date.now()}-${idx}-${eIdx}`,
-              title: e.title?.trim() || 'Exam',
-              course: courseObj.name,
-              date: e.date || '',
-              location: e.location?.trim() || '',
-              notes: e.notes || (e.weightPercent ? `Grading weight: ${e.weightPercent}%` : ''),
-              priority: 'High',
-              estimatedWorkload: e.estimatedWorkload || 8,
-              weightPercent: e.weightPercent || null,
-              createdAt: new Date().toISOString(),
-            });
-            baseExams.push(examObj);
+          if (mergeResult.success) {
+            // Update existing course in baseCourses
+            baseCourses = baseCourses.map((c) =>
+              c.id === mergeResult.updatedCourse.id ? ensureEntityMetadata(mergeResult.updatedCourse) : c
+            );
             enqueueMutation(userId, {
-              entity: 'exams',
+              entity: 'courses',
               action: 'upsert',
-              clientId: examObj.id,
-              data: examObj,
+              clientId: mergeResult.updatedCourse.id,
+              data: mergeResult.updatedCourse,
             });
-            addedExamCount++;
+            updatedCourseCount++;
+
+            // Append newly discovered topics
+            mergeResult.addedTopics.forEach((t) => {
+              const topicObj = ensureEntityMetadata(t);
+              baseTopics.push(topicObj);
+              enqueueMutation(userId, {
+                entity: 'syllabusTopics',
+                action: 'upsert',
+                clientId: topicObj.id,
+                data: topicObj,
+              });
+              addedTopicCount++;
+            });
+
+            // Append newly discovered assignments (while preserving existing completed tasks)
+            mergeResult.addedAssignments.forEach((a) => {
+              const asgObj = ensureEntityMetadata(a);
+              baseAssignments.push(asgObj);
+              enqueueMutation(userId, {
+                entity: 'assignments',
+                action: 'upsert',
+                clientId: asgObj.id,
+                data: asgObj,
+              });
+              addedAssignmentCount++;
+            });
+
+            // Append newly discovered exams
+            mergeResult.addedExams.forEach((e) => {
+              const examObj = ensureEntityMetadata(e);
+              baseExams.push(examObj);
+              enqueueMutation(userId, {
+                entity: 'exams',
+                action: 'upsert',
+                clientId: examObj.id,
+                data: examObj,
+              });
+              addedExamCount++;
+            });
+          }
+        } else {
+          // Genuinely new course
+          const courseId = Date.now() + idx + Math.floor(Math.random() * 1000);
+          const courseObj = ensureEntityMetadata({
+            id: courseId,
+            name: imported.name || imported.courseCode || `Course ${idx + 1}`,
+            instructor: imported.instructor || '',
+            schedule: imported.schedule || '',
+            credits: imported.credits || '3.0',
+            difficulty: imported.difficulty || 'Medium',
+            color: imported.color || IMPORT_PRESET_COLORS[idx % IMPORT_PRESET_COLORS.length],
+            term: imported.term || 'Fall',
+            year: imported.year || new Date().getFullYear(),
+            institution: imported.institution || '',
+            syllabusFileHash: imported.contentHash || null,
+            createdAt: new Date().toISOString(),
+            gradingScheme: imported.gradingScheme || [],
           });
+          baseCourses.push(courseObj);
+          enqueueMutation(userId, {
+            entity: 'courses',
+            action: 'upsert',
+            clientId: courseObj.id,
+            data: courseObj,
+          });
+          addedCourseCount++;
+
+          // Add weekly topics
+          if (imported.topics && imported.topics.length > 0) {
+            imported.topics.forEach((t, tIdx) => {
+              const topicObj = ensureEntityMetadata({
+                id: `topic-${Date.now()}-${idx}-${tIdx}`,
+                courseId: courseId,
+                courseName: courseObj.name,
+                weekNumber: Number(t.weekNumber) || tIdx + 1,
+                title: t.title?.trim() || `Week ${tIdx + 1} Lecture`,
+                description: t.description?.trim() || '',
+                requiredReadings: t.requiredReadings?.trim() || '',
+                practiceProblems: t.practiceProblems?.trim() || '',
+                estimatedHours: Number(t.estimatedHours) || 3.0,
+                prerequisiteTopicIds: [],
+                status: 'not_started',
+                confidence: 3,
+                lastUpdated: new Date().toISOString(),
+              });
+              baseTopics.push(topicObj);
+              enqueueMutation(userId, {
+                entity: 'syllabusTopics',
+                action: 'upsert',
+                clientId: topicObj.id,
+                data: topicObj,
+              });
+              addedTopicCount++;
+            });
+          }
+
+          // Add assignments
+          if (imported.assignments && imported.assignments.length > 0) {
+            imported.assignments.forEach((a, aIdx) => {
+              const asgObj = ensureEntityMetadata({
+                id: `asg-${Date.now()}-${idx}-${aIdx}`,
+                title: a.title?.trim() || a.originalName || `Assignment ${aIdx + 1}`,
+                originalName: a.originalName || a.title?.trim() || `Assignment ${aIdx + 1}`,
+                course: courseObj.name,
+                dueDate: a.dueDate || '',
+                dueTime: a.dueTime || '23:59',
+                priority: a.priority || (a.weightPercent && a.weightPercent >= 15 ? 'High' : 'Medium'),
+                estimatedWorkload: a.estimatedWorkload || (a.weightPercent && a.weightPercent >= 15 ? 6 : 4),
+                weightPercent: a.weightPercent || null,
+                completed: false,
+                createdAt: new Date().toISOString(),
+              });
+              baseAssignments.push(asgObj);
+              enqueueMutation(userId, {
+                entity: 'assignments',
+                action: 'upsert',
+                clientId: asgObj.id,
+                data: asgObj,
+              });
+              addedAssignmentCount++;
+            });
+          }
+
+          // Add exams
+          if (imported.exams && imported.exams.length > 0) {
+            imported.exams.forEach((e, eIdx) => {
+              const examObj = ensureEntityMetadata({
+                id: `exam-${Date.now()}-${idx}-${eIdx}`,
+                title: e.title?.trim() || e.originalName || 'Exam',
+                originalName: e.originalName || e.title?.trim() || 'Exam',
+                course: courseObj.name,
+                date: e.date || '',
+                time: e.time || '',
+                location: e.location?.trim() || '',
+                notes: e.notes || (e.weightPercent ? `Grading weight: ${e.weightPercent}%` : ''),
+                priority: 'High',
+                estimatedWorkload: e.estimatedWorkload || 8,
+                weightPercent: e.weightPercent || null,
+                createdAt: new Date().toISOString(),
+              });
+              baseExams.push(examObj);
+              enqueueMutation(userId, {
+                entity: 'exams',
+                action: 'upsert',
+                clientId: examObj.id,
+                data: examObj,
+              });
+              addedExamCount++;
+            });
+          }
         }
       });
 
@@ -1028,15 +1278,16 @@ export function AppProvider({ children }) {
       setAssignments(baseAssignments);
       setExams(baseExams);
 
-      addToast(
-        `🎉 Semester configured! Added ${addedCourseCount} course(s), ${addedTopicCount} syllabus topics, ${addedAssignmentCount} assignments, and ${addedExamCount} exams.`,
-        'success',
-        7000
-      );
+      const msg = updatedCourseCount > 0
+        ? `✨ Semester updated: merged into ${updatedCourseCount} course(s), added ${addedTopicCount} new topics, ${addedAssignmentCount} assignments, ${addedExamCount} exams. Existing progress preserved!`
+        : `🎉 Semester configured! Added ${addedCourseCount} course(s), ${addedTopicCount} syllabus topics, ${addedAssignmentCount} assignments, and ${addedExamCount} exams.`;
+
+      addToast(msg, 'success', 7000);
 
       return {
         success: true,
         addedCourseCount,
+        updatedCourseCount,
         addedTopicCount,
         addedAssignmentCount,
         addedExamCount,
@@ -1214,11 +1465,26 @@ export function AppProvider({ children }) {
       openMigrationModal,
       closeMigrationModal,
       handleMigrationComplete,
+      // Bilingual i18n (Phase 4)
+      language,
+      changeLanguage,
+      t,
+      // Timetable & Transition Buffer (Phase 4)
+      timetable,
+      transitionBufferMinutes,
+      setTransitionBufferMinutes,
+      timetableConflicts,
+      addTimetableEntry,
+      updateTimetableEntry,
+      deleteTimetableEntry,
+      importTimetableEntries,
       exportData: exportAllData,
       importData: handleImportBackup,
       importSemesterFromSyllabi,
     }),
     [
+      language,
+      changeLanguage,
       courses,
       assignments,
       exams,
@@ -1279,6 +1545,13 @@ export function AppProvider({ children }) {
       handleClearAll,
       handleImportBackup,
       importSemesterFromSyllabi,
+      timetable,
+      transitionBufferMinutes,
+      timetableConflicts,
+      addTimetableEntry,
+      updateTimetableEntry,
+      deleteTimetableEntry,
+      importTimetableEntries,
     ]
   );
 
