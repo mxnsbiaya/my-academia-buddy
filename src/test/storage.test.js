@@ -8,6 +8,9 @@ import {
   importAllData,
   clearAllData,
   loadSampleDemoData,
+  loadScenarioData,
+  getConsistentStudentData,
+  getDelayedStudentData,
   STORAGE_KEYS,
 } from '../services/storage';
 
@@ -73,5 +76,31 @@ describe('Storage Service', () => {
   it('rejects invalid backup format gracefully', () => {
     const result = importAllData('{ "invalid": true }');
     expect(result.success).toBe(false);
+  });
+
+  it('loads distinct student scenarios for Alex (Consistent) and Jordan (Delayed)', () => {
+    // 1. Consistent Student
+    const consistent = getConsistentStudentData();
+    expect(consistent.profile.name).toBe('Alex Chen');
+    expect(consistent.adaptiveSignals.paceMultiplier).toBe(1.0);
+    expect(consistent.adaptiveSignals.completionRate).toBe(96);
+    expect(consistent.courses).toHaveLength(4);
+    expect(consistent.topics).toHaveLength(16);
+
+    // 2. Delayed Student
+    const delayed = getDelayedStudentData();
+    expect(delayed.profile.name).toBe('Jordan Taylor');
+    expect(delayed.adaptiveSignals.paceMultiplier).toBe(1.3);
+    expect(delayed.adaptiveSignals.completionRate).toBe(45);
+    expect(delayed.adaptiveSignals.missedSessionsCount).toBe(5);
+    expect(delayed.courses).toHaveLength(4);
+    expect(delayed.topics).toHaveLength(16);
+
+    // 3. Test scenario loader
+    loadScenarioData('delayed');
+    const loadedSignals = safeGetItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, null);
+    expect(loadedSignals.paceMultiplier).toBe(1.3);
+    const loadedProfile = safeGetItem(STORAGE_KEYS.STUDENT_PROFILE, null);
+    expect(loadedProfile.name).toBe('Jordan Taylor');
   });
 });

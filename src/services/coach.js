@@ -98,8 +98,8 @@ export function generateWeeklyCheckInQuestions(arg1 = [], arg2 = [], arg3 = []) 
         !(t.status === 'reviewed' && (t.confidence ?? 3) >= 4)
     );
 
-    // Pick 1 to 2 focal topics per course
-    const focalTopics = candidateTopics.slice(0, 2);
+    // Pick 1 primary focal topic per course for a realistic 2-minute check-in
+    const focalTopics = candidateTopics.slice(0, 1);
 
     focalTopics.forEach((topic) => {
       // 1. Lecture & concept engagement question
@@ -287,6 +287,7 @@ export function calculateCourseReadiness(course, topics = [], assignments = [], 
   }
 
   return {
+    courseId: course.id || course.name,
     courseName: course.name,
     overallReadiness,
     topicScore,

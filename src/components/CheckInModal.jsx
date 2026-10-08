@@ -28,15 +28,6 @@ export function CheckInModal({ isOpen, onClose }) {
   const handleSubmit = (e) => {
     e.preventDefault();
 
-    // Validate that at least the status questions have responses
-    const statusQuestions = questions.filter((q) => q.type === 'status');
-    const unanswered = statusQuestions.filter((q) => !answers[q.id]);
-
-    if (unanswered.length > 0) {
-      setFormError(`Please provide answers for all ${statusQuestions.length} topic questions.`);
-      return;
-    }
-
     const formattedResponses = questions
       .filter((q) => q.type !== 'commitments')
       .map((q) => ({
@@ -46,7 +37,7 @@ export function CheckInModal({ isOpen, onClose }) {
         questionText: q.questionText,
         field: q.field,
         type: q.type,
-        answer: q.type === 'confidence' ? confidenceScores[q.id] || 3 : answers[q.id],
+        answer: q.type === 'confidence' ? confidenceScores[q.id] || 3 : answers[q.id] || CHECK_IN_ANSWERS.COMPLETED,
         confidenceScore: confidenceScores[q.id] || 3,
       }));
 
@@ -58,17 +49,40 @@ export function CheckInModal({ isOpen, onClose }) {
     onClose();
   };
 
+  const handleQuickFill = () => {
+    const allDone = {};
+    const highConf = {};
+    questions.forEach((q) => {
+      if (q.type !== 'commitments' && q.type !== 'confidence') {
+        allDone[q.id] = CHECK_IN_ANSWERS.COMPLETED;
+      } else if (q.type === 'confidence') {
+        highConf[q.id] = 4;
+      }
+    });
+    setAnswers(allDone);
+    setConfidenceScores(highConf);
+    setFormError('');
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Weekly Academic Check-In (2 Minutes)">
       <div className="checkin-modal-container">
         <div className="checkin-intro-card">
           <span className="checkin-coach-icon" aria-hidden="true">🎯</span>
-          <div>
+          <div style={{ flex: 1 }}>
             <strong>Personalized Weekly Check-In</strong>
             <p>
               Your academic coach uses these quick questions to understand your actual progress on specific course topics, identify delays, and adapt your study schedule.
             </p>
           </div>
+          <button
+            type="button"
+            className="btn btn-xs btn-outline"
+            onClick={handleQuickFill}
+            title="Quickly mark all questions as completed on schedule"
+          >
+            ⚡ Quick Fill: All On Track
+          </button>
         </div>
 
         {formError && (

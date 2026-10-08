@@ -20,6 +20,7 @@ export function Dashboard() {
     toggleEmergencyExamMode,
     toggleSessionCompleted,
     openCheckInModal,
+    loadScenario,
   } = useApp();
 
   const completedAssignmentsCount = assignments.filter((a) => a.completed).length;
@@ -182,6 +183,26 @@ export function Dashboard() {
         </div>
 
         <div className="coach-banner-actions">
+          <div className="persona-switch-group">
+            <span className="persona-switch-label">Simulate Student:</span>
+            <button
+              type="button"
+              className={`btn btn-xs ${studentProfile?.name?.includes('Alex') ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => loadScenario('consistent')}
+              title="Simulate Student A: Alex Chen (Consistent, On-Track)"
+            >
+              🟢 Alex (Consistent)
+            </button>
+            <button
+              type="button"
+              className={`btn btn-xs ${studentProfile?.name?.includes('Jordan') ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => loadScenario('delayed')}
+              title="Simulate Student B: Jordan Taylor (Delayed, Catch-Up)"
+            >
+              🟠 Jordan (Delayed)
+            </button>
+          </div>
+
           <button
             type="button"
             className={`btn btn-sm ${emergencyExamMode ? 'btn-danger' : 'btn-outline'}`}
@@ -386,7 +407,7 @@ export function Dashboard() {
             ) : (
               <div className="readiness-cards-list">
                 {courseReadinessList.map((cr) => (
-                  <div key={cr.courseId} className="readiness-card">
+                  <div key={cr.courseId || cr.courseName} className="readiness-card">
                     <div className="readiness-top-row">
                       <div>
                         <strong className="readiness-course-name">{cr.courseName}</strong>
@@ -447,7 +468,7 @@ export function Dashboard() {
                       <div className="outstanding-title">{top.title}</div>
                       <div className="outstanding-meta">
                         <span className="topic-course-badge">{top.courseName}</span>
-                        <span>• Week {top.week}</span>
+                        <span>• Week {top.weekNumber || top.week}</span>
                         <span>• Status: {top.status === 'not_started' ? 'Not Started' : top.status}</span>
                       </div>
                     </div>

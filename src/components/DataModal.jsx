@@ -3,7 +3,7 @@ import { useApp } from '../context/useApp';
 import { Modal } from './Modal';
 
 export function DataModal({ isOpen, onClose }) {
-  const { exportData, importData, loadDemoData, clearAllData, addToast } = useApp();
+  const { exportData, importData, loadScenario, clearAllData, addToast } = useApp();
   const fileInputRef = useRef(null);
   const [confirmClear, setConfirmClear] = useState(false);
 
@@ -56,8 +56,13 @@ export function DataModal({ isOpen, onClose }) {
     onClose();
   };
 
-  const handleLoadSample = () => {
-    loadDemoData();
+  const handleLoadConsistent = () => {
+    loadScenario('consistent');
+    onClose();
+  };
+
+  const handleLoadDelayed = () => {
+    loadScenario('delayed');
     onClose();
   };
 
@@ -98,10 +103,18 @@ export function DataModal({ isOpen, onClose }) {
           </div>
 
           <div className="data-card">
-            <h4>✨ Load Sample Demo Data</h4>
-            <p>Populate realistic university courses (SEG2105, CSI2110, MAT1348) and deadlines for quick demonstration.</p>
-            <button type="button" className="btn btn-primary" onClick={handleLoadSample}>
-              Load Demo Dataset
+            <h4>🟢 Scenario A: On-Track Student</h4>
+            <p><strong>Alex Chen:</strong> 4 courses (CSI2110, SEG2105, MAT1348, ENG1112), high syllabus completion (96%), balanced 1.0x pace, 85-94% readiness across all courses.</p>
+            <button type="button" className="btn btn-primary btn-sm" onClick={handleLoadConsistent}>
+              Load Alex (On-Track)
+            </button>
+          </div>
+
+          <div className="data-card">
+            <h4>🟠 Scenario B: Delayed Student</h4>
+            <p><strong>Jordan Taylor:</strong> Same 4 courses with 2-3 weeks of accumulated delays, +30% buffer pace (1.3x), rescheduled recovery topics, low confidence & exam critical alerts.</p>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleLoadDelayed}>
+              Load Jordan (Delayed)
             </button>
           </div>
 

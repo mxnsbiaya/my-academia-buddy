@@ -6,7 +6,7 @@ import {
   exportAllData,
   importAllData,
   clearAllData,
-  loadSampleDemoData,
+  loadScenarioData,
   getDefaultStudentProfile,
   getDefaultAdaptiveSignals,
   generateDefaultTopicsForCourse,
@@ -262,36 +262,59 @@ export function AppProvider({ children }) {
       setCheckIns(updatedCheckIns);
 
       // 2. Update topic progress based on check-in answers
-      responses.forEach((resp) => {
-        if (resp.topicId) {
-          setSyllabusTopics((prev) =>
-            prev.map((t) => {
-              if (t.id === resp.topicId) {
-                let nextStatus = t.status;
-                if (resp.field === 'lecture' && resp.answer === 'completed') {
-                  if (t.status === 'not_started') nextStatus = 'attended_lecture';
-                } else if (resp.field === 'reading' && resp.answer === 'completed') {
-                  nextStatus = 'reading_completed';
-                } else if (resp.field === 'practice' && resp.answer === 'completed') {
-                  nextStatus = 'practiced';
-                }
-                const nextConf = resp.confidenceScore ? Number(resp.confidenceScore) : t.confidence;
-                return { ...t, status: nextStatus, confidence: nextConf, lastUpdated: new Date().toISOString() };
-              }
-              return t;
-            })
-          );
-        }
-      });
+      let updatedTopics = syllabusTopics;
+      if (Array.isArray(responses) && responses.length > 0) {
+        updatedTopics = syllabusTopics.map((t) => {
+          const resp = responses.find((r) => r.topicId === t.id);
+          if (resp) {
+            let nextStatus = t.status;
+            if (resp.field === 'lecture' && (resp.answer === 'completed' || resp.answer === 'partially_completed')) {
+              if (t.status === 'not_started') nextStatus = 'attended_lecture';
+            } else if (resp.field === 'reading' && resp.answer === 'completed') {
+              nextStatus = 'reading_completed';
+            } else if (resp.field === 'practice' && resp.answer === 'completed') {
+              nextStatus = 'practiced';
+            }
+            const nextConf = resp.confidenceScore ? Number(resp.confidenceScore) : t.confidence;
+            return { ...t, status: nextStatus, confidence: nextConf, lastUpdated: new Date().toISOString() };
+          }
+          return t;
+        });
+        setSyllabusTopics(updatedTopics);
+      }
 
       // 3. Recalibrate adaptive pacing signals
       const nextSignals = recalibrateAdaptiveSignals(updatedCheckIns, studyPlan, adaptiveSignals);
       setAdaptiveSignals(nextSignals);
 
+      // 4. Automatically adapt study plan if plan exists
+      if (studyPlan && studyPlan.length > 0) {
+        const missedTopics = identifyMissedTopicsForRescheduling(updatedCheckIns, updatedTopics);
+        const missedIds = missedTopics.map((t) => t.id);
+
+        const result = generateStudyPlan({
+          courses,
+          assignments,
+          exams,
+          availability,
+          syllabusTopics: updatedTopics,
+          existingPlan: studyPlan,
+          preserveCompleted: true,
+          adaptiveSignals: nextSignals,
+          missedTopicIds: missedIds,
+          emergencyExamMode,
+        });
+
+        if (result && result.plan) {
+          setStudyPlan(result.plan);
+          if (result.insights) setInsights(result.insights);
+        }
+      }
+
       addToast('Weekly check-in complete! Your adaptive study plan was recalibrated.', 'success', 5000);
       return newCheckIn;
     },
-    [checkIns, studyPlan, adaptiveSignals, addToast]
+    [checkIns, studyPlan, adaptiveSignals, addToast, syllabusTopics, courses, assignments, exams, availability, emergencyExamMode]
   );
 
   // --- Assignment Operations ---
@@ -485,20 +508,54 @@ export function AppProvider({ children }) {
   );
 
   // --- Global Backup & Demo Operations ---
+  const handleLoadScenario = useCallback(
+    (scenarioType = 'consistent') => {
+      const data = loadScenarioData(scenarioType);
+      setCourses(data.courses);
+      setAssignments(data.assignments);
+      setExams(data.exams);
+      setAvailability(data.availability);
+      setStudentProfile(data.profile);
+      setSyllabusTopics(data.topics);
+      setCheckIns(data.checkIns);
+      setAdaptiveSignals(data.adaptiveSignals);
+
+      // Immediately generate realistic plan for this student
+      const missedTopics = identifyMissedTopicsForRescheduling(data.checkIns, data.topics);
+      const missedIds = missedTopics.map((t) => t.id);
+      const planResult = generateStudyPlan({
+        courses: data.courses,
+        assignments: data.assignments,
+        exams: data.exams,
+        availability: data.availability,
+        syllabusTopics: data.topics,
+        existingPlan: [],
+        preserveCompleted: false,
+        adaptiveSignals: data.adaptiveSignals,
+        missedTopicIds: missedIds,
+        emergencyExamMode: false,
+      });
+
+      if (planResult && planResult.plan) {
+        setStudyPlan(planResult.plan);
+        setInsights(planResult.insights || null);
+      } else {
+        setStudyPlan([]);
+        setInsights(null);
+      }
+
+      const personaLabel =
+        scenarioType === 'delayed'
+          ? 'Jordan Taylor (Delayed Student — +30% Buffer Pace, Exam Alerts)'
+          : 'Alex Chen (Consistent Student — Balanced Pace, High Readiness)';
+      addToast(`Loaded Persona: ${personaLabel}`, 'success', 6000);
+    },
+    [addToast]
+  );
+
   const handleLoadDemo = useCallback(() => {
-    loadSampleDemoData();
-    setCourses(safeGetItem(STORAGE_KEYS.COURSES, []));
-    setAssignments(safeGetItem(STORAGE_KEYS.ASSIGNMENTS, []));
-    setExams(safeGetItem(STORAGE_KEYS.EXAMS, []));
-    setAvailability(safeGetItem(STORAGE_KEYS.AVAILABILITY, []));
-    setStudentProfile(safeGetItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile()));
-    setSyllabusTopics(safeGetItem(STORAGE_KEYS.SYLLABUS_TOPICS, []));
-    setCheckIns(safeGetItem(STORAGE_KEYS.CHECK_INS, []));
-    setAdaptiveSignals(safeGetItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals()));
-    setStudyPlan([]);
-    setInsights(null);
-    addToast('Loaded university demo dataset with courses, syllabus topics, and coach history.', 'success');
-  }, [addToast]);
+    handleLoadScenario('consistent');
+  }, [handleLoadScenario]);
 
   const handleClearAll = useCallback(() => {
     clearAllData();
@@ -578,6 +635,7 @@ export function AppProvider({ children }) {
       clearPlan,
       toggleEmergencyExamMode,
       loadDemoData: handleLoadDemo,
+      loadScenario: handleLoadScenario,
       clearAllData: handleClearAll,
       isCheckInModalOpen,
       openCheckInModal,
@@ -638,6 +696,7 @@ export function AppProvider({ children }) {
       clearPlan,
       toggleEmergencyExamMode,
       handleLoadDemo,
+      handleLoadScenario,
       handleClearAll,
       handleImportBackup,
     ]
