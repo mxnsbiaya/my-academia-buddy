@@ -25,6 +25,7 @@ BEGIN
   -- ============================================================================
   -- 2. Simulate User A Context
   -- ============================================================================
+  PERFORM set_config('role', 'authenticated', true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_user_a::text, 'role', 'authenticated')::text, true);
 
   -- User A creates course with client_id '101'
@@ -52,6 +53,7 @@ BEGIN
   -- ============================================================================
   -- 3. Switch Context to User B
   -- ============================================================================
+  PERFORM set_config('role', 'authenticated', true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_user_b::text, 'role', 'authenticated')::text, true);
 
   -- Verify User B querying courses returns 0 of User A's rows
@@ -114,13 +116,18 @@ BEGIN
   -- ============================================================================
   -- 4. Switch back to User A and verify integrity
   -- ============================================================================
+  PERFORM set_config('role', 'authenticated', true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_user_a::text, 'role', 'authenticated')::text, true);
 
-  SELECT name INTO STRICT v_count FROM public.courses WHERE user_id = v_user_a AND client_id = '101';
-  -- User A course name should still be untouched
-  RAISE NOTICE '✓ Check 8 Passed: User A course remains intact and uncompromised.';
+  SELECT COUNT(*) INTO v_count FROM public.courses WHERE user_id = v_user_a AND client_id = '101';
+  IF v_count = 1 THEN
+    RAISE NOTICE '✓ Check 8 Passed: User A course remains intact and uncompromised.';
+  ELSE
+    RAISE EXCEPTION 'TEST FAILED: User A course was altered or removed!';
+  END IF;
 
-  -- Clean up test records
+  -- Reset role to postgres for test record cleanup
+  PERFORM set_config('role', 'postgres', true);
   DELETE FROM public.courses WHERE user_id IN (v_user_a, v_user_b);
   DELETE FROM auth.users WHERE id IN (v_user_a, v_user_b);
 

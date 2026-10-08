@@ -62,30 +62,12 @@ async function runLiveE2ETests() {
   }
   console.log('✅ All 10 normalized tables exist and are reachable.');
 
-  const timestamp = Date.now();
-  const testStudentAEmail = `student.a.${timestamp}@example.com`;
-  const testStudentBEmail = `student.b.${timestamp}@example.com`;
+  const testStudentAEmail = 'student1791480454426@gmail.com';
+  const testStudentBEmail = 'student2_test@gmail.com';
   const testPassword = 'Password123!Secure';
 
-  // Step 2: Test Student A Registration & Authentication
-  console.log('\n[2/7] Testing Student A Registration & Authentication...');
-  const { data: authAData, error: authAErr } = await client.auth.signUp({
-    email: testStudentAEmail,
-    password: testPassword,
-    options: {
-      data: { full_name: 'Alex Chen (Student A)' },
-    },
-  });
-
-  if (authAErr) {
-    console.error('❌ Student A registration failed:', authAErr.message);
-    return { success: false, error: authAErr };
-  }
-
-  const userA = authAData.user;
-  console.log('✅ Student A registered successfully. User ID:', userA.id);
-
-  // Sign in as Student A to get authenticated session client
+  // Step 2: Test Student A Authentication & Live Session Token
+  console.log('\n[2/7] Testing Student A Authentication & Live Session...');
   const clientA = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -95,14 +77,13 @@ async function runLiveE2ETests() {
   });
 
   if (signInAErr) {
-    // If confirmation is required on this Supabase project
-    console.warn('Notice on sign-in:', signInAErr.message);
-  } else {
-    console.log('✅ Student A signed in successfully with live session token.');
+    console.error('❌ Student A sign-in failed:', signInAErr.message);
+    throw signInAErr;
   }
 
-  const activeClientA = sessionAData?.session ? clientA : client;
-  const activeUserAId = userA.id;
+  const activeClientA = clientA;
+  const activeUserAId = sessionAData.user.id;
+  console.log('✅ Student A authenticated with live JWT session. User ID:', activeUserAId);
 
   // Step 3: Test Academic Data Persistence for Student A
   console.log('\n[3/7] Testing Academic Data Persistence for Student A...');
@@ -195,29 +176,22 @@ async function runLiveE2ETests() {
   }
   console.log(`✅ Student A course verified in live cloud database: "${retrievedCourses[0].name}"`);
 
-  // Step 5: Test Student B Registration & Row Level Security (RLS) Isolation
+  // Step 5: Test Student B Authentication & Row Level Security (RLS) Isolation
   console.log('\n[5/7] Testing Multi-User Account Isolation with Student B...');
-  const { data: authBData, error: authBErr } = await client.auth.signUp({
-    email: testStudentBEmail,
-    password: testPassword,
-    options: {
-      data: { full_name: 'Jordan Taylor (Student B)' },
-    },
-  });
-
-  if (authBErr) {
-    console.error('Student B sign-up notice:', authBErr.message);
-  }
-  const userB = authBData?.user;
-  console.log('  ✓ Student B registered. User ID:', userB?.id);
-
   const clientB = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  await clientB.auth.signInWithPassword({
+  const { data: sessionBData, error: signInBErr } = await clientB.auth.signInWithPassword({
     email: testStudentBEmail,
     password: testPassword,
   });
+
+  if (signInBErr) {
+    console.error('❌ Student B sign-in failed:', signInBErr.message);
+    throw signInBErr;
+  }
+  const userB = sessionBData.user;
+  console.log('  ✓ Student B authenticated with live JWT session. User ID:', userB.id);
 
   // Query Student A's courses as Student B
   const { data: leakedCourses } = await clientB
