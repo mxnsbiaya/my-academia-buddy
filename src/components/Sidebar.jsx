@@ -2,10 +2,27 @@ import { NavLink } from 'react-router-dom';
 import { useApp } from '../context/useApp';
 
 export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
-  const { courses, assignments, exams, studyPlan } = useApp();
+  const {
+    courses,
+    assignments,
+    exams,
+    studyPlan,
+    studentProfile,
+    checkIns = [],
+    openCheckInModal,
+    openProfileModal,
+  } = useApp();
 
   const pendingAssignmentsCount = assignments.filter((a) => !a.completed).length;
   const taskSessionsCount = studyPlan.filter((s) => s.type !== 'Break' && !s.completed).length;
+
+  const hasRecentCheckIn = (() => {
+    if (!checkIns || checkIns.length === 0) return false;
+    const last = checkIns[checkIns.length - 1];
+    if (!last?.date) return false;
+    const diffDays = (new Date() - new Date(last.date)) / (1000 * 60 * 60 * 24);
+    return diffDays < 5;
+  })();
 
   const getLinkClass = ({ isActive }) =>
     isActive ? 'sidebar-nav-item active' : 'sidebar-nav-item';
@@ -20,7 +37,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
           </div>
           <div className="brand-text">
             <h1 className="brand-title">Academia Buddy</h1>
-            <span className="brand-subtitle">v2.0 Productivity Suite</span>
+            <span className="brand-subtitle">Adaptive Academic Coach</span>
           </div>
           {isOpen && (
             <button
@@ -35,6 +52,8 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
         </div>
 
         <nav className="sidebar-nav">
+          <div className="nav-section-title">CORE WORKSPACE</div>
+
           <NavLink to="/" end className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">🏠</span>
             <span className="nav-label">Dashboard</span>
@@ -42,7 +61,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
 
           <NavLink to="/courses" className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">📚</span>
-            <span className="nav-label">Courses</span>
+            <span className="nav-label">Courses & Syllabus</span>
             {courses.length > 0 && <span className="nav-counter">{courses.length}</span>}
           </NavLink>
 
@@ -62,11 +81,40 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
 
           <NavLink to="/study-planner" className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">✨</span>
-            <span className="nav-label">Smart Planner</span>
+            <span className="nav-label">Adaptive Planner</span>
             {taskSessionsCount > 0 && (
               <span className="nav-counter counter-accent">{taskSessionsCount}</span>
             )}
           </NavLink>
+
+          <div className="nav-section-title" style={{ marginTop: '16px' }}>ACADEMIC COACH</div>
+
+          <button
+            type="button"
+            className="sidebar-coach-nav-btn"
+            onClick={() => {
+              if (onClose) onClose();
+              openCheckInModal();
+            }}
+          >
+            <span className="nav-icon" aria-hidden="true">🧭</span>
+            <span className="nav-label">Weekly Check-In</span>
+            {!hasRecentCheckIn && (
+              <span className="checkin-badge-pill">Due</span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            className="sidebar-coach-nav-btn"
+            onClick={() => {
+              if (onClose) onClose();
+              openProfileModal();
+            }}
+          >
+            <span className="nav-icon" aria-hidden="true">👤</span>
+            <span className="nav-label">Student Profile</span>
+          </button>
         </nav>
 
         <div className="sidebar-footer">
@@ -82,11 +130,24 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
             <span>Data & Backup</span>
           </button>
 
-          <div className="sidebar-user-pill">
+          <div
+            className="sidebar-user-pill clickable-pill"
+            onClick={() => {
+              if (onClose) onClose();
+              openProfileModal();
+            }}
+            title="Click to view student profile"
+          >
             <div className="status-indicator" />
             <div className="user-info">
-              <span className="user-name">Local Student Mode</span>
-              <span className="user-status">Private & Offline</span>
+              <span className="user-name">
+                {studentProfile?.name || 'Local Student'}
+              </span>
+              <span className="user-status">
+                {studentProfile?.program
+                  ? `${studentProfile.program} • ${studentProfile.semester || 'S1'}`
+                  : 'Private & Offline'}
+              </span>
             </div>
           </div>
         </div>

@@ -2,7 +2,15 @@ import { useMemo } from 'react';
 import { useApp } from '../context/useApp';
 
 export function Header({ onToggleSidebar, onOpenDataModal }) {
-  const { assignments, exams } = useApp();
+  const {
+    assignments,
+    exams,
+    studentProfile,
+    checkIns = [],
+    openCheckInModal,
+    openProfileModal,
+    adaptiveSignals,
+  } = useApp();
 
   const urgentCount = useMemo(() => {
     const now = new Date();
@@ -32,6 +40,14 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
     });
   }, []);
 
+  const hasRecentCheckIn = useMemo(() => {
+    if (!checkIns || checkIns.length === 0) return false;
+    const last = checkIns[checkIns.length - 1];
+    if (!last?.date) return false;
+    const diffDays = (new Date() - new Date(last.date)) / (1000 * 60 * 60 * 24);
+    return diffDays < 5;
+  }, [checkIns]);
+
   return (
     <header className="app-header">
       <div className="header-left">
@@ -55,9 +71,42 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
             <span>{urgentCount} due soon</span>
           </div>
         )}
+
+        {adaptiveSignals?.paceMultiplier > 1.05 && (
+          <div className="header-coach-pill" title="Adaptive Pace Buffer active">
+            <span className="coach-dot">🛡️</span>
+            <span>+20% Buffer Active</span>
+          </div>
+        )}
       </div>
 
       <div className="header-right">
+        {/* Weekly Check-In Quick Button */}
+        <button
+          type="button"
+          className={`header-btn checkin-trigger-btn ${!hasRecentCheckIn ? 'checkin-pulse' : ''}`}
+          onClick={openCheckInModal}
+          title="Take 2-minute weekly check-in"
+        >
+          <span aria-hidden="true">🧭</span>
+          <span className="header-btn-label">Weekly Check-In</span>
+          {!hasRecentCheckIn && <span className="header-checkin-badge">Due</span>}
+        </button>
+
+        {/* Profile / Coach Preferences */}
+        <button
+          type="button"
+          className="header-btn"
+          onClick={openProfileModal}
+          title="View Student Profile & Availability Preferences"
+        >
+          <span aria-hidden="true">👤</span>
+          <span className="header-btn-label">
+            {studentProfile?.name ? studentProfile.name.split(' ')[0] : 'Profile'}
+          </span>
+        </button>
+
+        {/* Data Backup */}
         <button
           type="button"
           className="header-btn"

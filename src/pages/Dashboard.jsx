@@ -3,14 +3,29 @@ import { Link } from 'react-router-dom';
 import { useApp } from '../context/useApp';
 import { Badge } from '../components/Badge';
 import { formatReadableDate } from '../services/scheduler';
+import { calculateCourseReadiness } from '../services/coach';
 
 export function Dashboard() {
-  const { courses, assignments, exams, studyPlan, insights, toggleSessionCompleted } = useApp();
+  const {
+    courses,
+    assignments,
+    exams,
+    studyPlan,
+    insights,
+    studentProfile,
+    syllabusTopics = [],
+    checkIns = [],
+    adaptiveSignals,
+    emergencyExamMode,
+    toggleEmergencyExamMode,
+    toggleSessionCompleted,
+    openCheckInModal,
+  } = useApp();
 
   const completedAssignmentsCount = assignments.filter((a) => a.completed).length;
   const pendingAssignments = assignments.filter((a) => !a.completed);
 
-  // Filter exams that are in the future or today
+  // Filter exams in the future or today
   const upcomingExams = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -53,55 +68,152 @@ export function Dashboard() {
   const studyProgressPercent =
     taskSessions.length === 0 ? 0 : Math.round((completedSessionsCount / taskSessions.length) * 100);
 
-  // Next recommended study session
-  const nextSession = useMemo(() => {
-    const uncompleted = taskSessions.filter((s) => !s.completed);
-    return uncompleted[0] || null;
-  }, [taskSessions]);
+  // "What should I do today?" Daily Agenda
+  // Filter sessions for today's date (or next scheduled day if today is empty)
+  const todayDateStr = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }, []);
 
-  // Workload breakdown by course
-  const courseWorkloadBreakdown = useMemo(() => {
-    const breakdown = {};
-    courses.forEach((c) => {
-      breakdown[c.name] = { course: c, assignments: 0, exams: 0, estimatedHours: 0 };
+  const todaySessions = useMemo(() => {
+    const forToday = taskSessions.filter((s) => s.date === todayDateStr);
+    if (forToday.length > 0) return forToday;
+
+    // Fallback: next upcoming day's sessions
+    const sortedFuture = [...taskSessions]
+      .filter((s) => !s.completed)
+      .sort((a, b) => (a.date > b.date ? 1 : -1));
+
+    if (sortedFuture.length === 0) return [];
+    const firstDate = sortedFuture[0].date;
+    return sortedFuture.filter((s) => s.date === firstDate);
+  }, [taskSessions, todayDateStr]);
+
+  const todayDateLabel = useMemo(() => {
+    if (todaySessions.length === 0) return 'Today';
+    if (todaySessions[0].date === todayDateStr) return 'Today';
+    return formatReadableDate(todaySessions[0].date);
+  }, [todaySessions, todayDateStr]);
+
+  // Course Readiness calculated for each course
+  const courseReadinessList = useMemo(() => {
+    return courses.map((course) =>
+      calculateCourseReadiness(course, syllabusTopics, assignments, exams)
+    );
+  }, [courses, syllabusTopics, assignments, exams]);
+
+  // Most urgent course (lowest readiness score or nearest exam)
+  const mostUrgentCourse = useMemo(() => {
+    if (courseReadinessList.length === 0) return null;
+    const sorted = [...courseReadinessList].sort((a, b) => {
+      // Prioritize courses with exams within 7 days
+      if (a.hasExamUrgency && !b.hasExamUrgency) return -1;
+      if (!a.hasExamUrgency && b.hasExamUrgency) return 1;
+      return a.readinessScore - b.readinessScore;
     });
+    return sorted[0];
+  }, [courseReadinessList]);
 
-    pendingAssignments.forEach((a) => {
-      const cName = a.course || 'General';
-      if (!breakdown[cName]) {
-        breakdown[cName] = { course: { name: cName, color: '#38bdf8' }, assignments: 0, exams: 0, estimatedHours: 0 };
-      }
-      breakdown[cName].assignments += 1;
-      breakdown[cName].estimatedHours += Number(a.estimatedWorkload || 3);
-    });
+  // Outstanding topics across all courses (unstarted or low confidence)
+  const outstandingTopics = useMemo(() => {
+    return syllabusTopics
+      .filter((t) => t.status === 'not_started' || (t.confidence && t.confidence <= 2))
+      .slice(0, 5);
+  }, [syllabusTopics]);
 
-    upcomingExams.forEach((e) => {
-      const cName = e.course || 'General';
-      if (!breakdown[cName]) {
-        breakdown[cName] = { course: { name: cName, color: '#818cf8' }, assignments: 0, exams: 0, estimatedHours: 0 };
-      }
-      breakdown[cName].exams += 1;
-      breakdown[cName].estimatedHours += Number(e.estimatedWorkload || 5);
-    });
-
-    return Object.values(breakdown).filter((b) => b.assignments > 0 || b.exams > 0);
-  }, [courses, pendingAssignments, upcomingExams]);
+  // Has check-in been completed recently?
+  const hasRecentCheckIn = useMemo(() => {
+    if (!checkIns || checkIns.length === 0) return false;
+    const last = checkIns[checkIns.length - 1];
+    if (!last?.date) return false;
+    const diffDays = (new Date() - new Date(last.date)) / (1000 * 60 * 60 * 24);
+    return diffDays < 5;
+  }, [checkIns]);
 
   return (
     <div className="page-container">
+      {/* Header */}
       <div className="page-header">
         <div>
+          <div className="planner-flagship-pill">Adaptive Academic Coach</div>
           <h1 className="page-title">Academic Dashboard</h1>
           <p className="page-subtitle">
-            Welcome back! Here is your workload, upcoming milestones, and schedule progress.
+            Welcome back{studentProfile?.name ? `, ${studentProfile.name}` : ''}! Workload monitoring, observable readiness, and adaptive daily guidance.
           </p>
         </div>
         <div className="header-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={openCheckInModal}
+          >
+            <span>🧭</span> Take Weekly Check-In
+          </button>
           <Link to="/study-planner" className="btn btn-primary">
-            <span>✨</span> Open Study Planner
+            <span>✨</span> Open Adaptive Planner
           </Link>
         </div>
       </div>
+
+      {/* Adaptive Coach Guidance Banner */}
+      <section className="coach-status-banner" aria-label="Academic Coach Status">
+        <div className="coach-banner-left">
+          <div className="coach-avatar-badge">🧠</div>
+          <div>
+            <div className="coach-banner-title">
+              <strong>Personal Coach Status:</strong>{' '}
+              {adaptiveSignals?.paceMultiplier > 1.1 ? (
+                <span className="coach-buffer-tag">
+                  +{Math.round((adaptiveSignals.paceMultiplier - 1) * 100)}% Buffer Pace Active
+                </span>
+              ) : (
+                <span className="coach-normal-tag">Balanced Realistic Pace</span>
+              )}
+            </div>
+            <p className="coach-banner-description">
+              {adaptiveSignals?.paceMultiplier > 1.1
+                ? 'Based on recent check-ins, we added breathing room buffer to study session durations so you stay on track without burnout.'
+                : 'Your study plan is running at standard calibrated pace with high consistency.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="coach-banner-actions">
+          <button
+            type="button"
+            className={`btn btn-sm ${emergencyExamMode ? 'btn-danger' : 'btn-outline'}`}
+            onClick={toggleEmergencyExamMode}
+            title="Focus schedule heavily on upcoming exams"
+          >
+            {emergencyExamMode ? '🚨 Emergency Exam Mode ON' : '⚡ Enable Emergency Exam Mode'}
+          </button>
+        </div>
+      </section>
+
+      {/* Weekly Check-In Reminder Banner */}
+      {!hasRecentCheckIn && (
+        <section className="checkin-reminder-banner" aria-label="Weekly Check-In Due">
+          <div className="checkin-banner-content">
+            <span className="checkin-banner-icon" aria-hidden="true">⏱️</span>
+            <div>
+              <h3>Weekly Academic Check-In Ready</h3>
+              <p>
+                Takes approximately 2 minutes. Reflect on lectures attended, readings completed, and topic confidence so your coach can adapt your schedule.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={openCheckInModal}
+          >
+            Start 2-Min Check-In →
+          </button>
+        </section>
+      )}
 
       {/* Top Stat Cards Grid */}
       <section className="stats-grid" aria-label="Key Academic Metrics">
@@ -111,7 +223,7 @@ export function Dashboard() {
             <span className="stat-label">Active Courses</span>
             <div className="stat-value">{courses.length}</div>
             <span className="stat-subtext">
-              {courses.length === 1 ? '1 course registered' : `${courses.length} courses registered`}
+              {syllabusTopics.length} syllabus topics tracked
             </span>
           </div>
         </div>
@@ -130,143 +242,218 @@ export function Dashboard() {
         <div className="stat-card">
           <div className="stat-icon-wrapper icon-purple" aria-hidden="true">📅</div>
           <div className="stat-content">
-            <span className="stat-label">Upcoming Exams</span>
-            <div className="stat-value">{upcomingExams.length}</div>
+            <span className="stat-label">Next Exam</span>
+            <div className="stat-value">
+              {upcomingExams.length > 0 ? upcomingExams[0].course : 'None'}
+            </div>
             <span className="stat-subtext">
-              {upcomingExams.length > 0 ? `Next: ${upcomingExams[0].date}` : 'No upcoming exams'}
+              {upcomingExams.length > 0 ? `${upcomingExams[0].date}` : 'No upcoming exams'}
             </span>
           </div>
         </div>
 
         <div className="stat-card">
-          <div className="stat-icon-wrapper icon-cyan" aria-hidden="true">⏱️</div>
+          <div className="stat-icon-wrapper icon-cyan" aria-hidden="true">🎯</div>
           <div className="stat-content">
-            <span className="stat-label">Planned Study Hours</span>
-            <div className="stat-value">{totalPlannedHours}h</div>
+            <span className="stat-label">Urgent Course</span>
+            <div className="stat-value">
+              {mostUrgentCourse ? mostUrgentCourse.courseName : 'None'}
+            </div>
             <span className="stat-subtext">
-              {taskSessions.length} total sessions in plan
+              {mostUrgentCourse
+                ? `${mostUrgentCourse.readinessScore}% readiness (${mostUrgentCourse.tier})`
+                : 'All courses balanced'}
             </span>
           </div>
         </div>
       </section>
 
-      {/* Next Recommended Session Spotlight */}
-      {nextSession ? (
-        <section className="spotlight-card" aria-label="Next Recommended Study Session">
-          <div className="spotlight-header">
-            <div className="spotlight-badge">
-              <span className="pulse-dot" /> NEXT RECOMMENDED SESSION
-            </div>
-            <span className="spotlight-timing">
-              {formatReadableDate(nextSession.date)} • {nextSession.startTime} - {nextSession.endTime} ({nextSession.sessionLength}m)
-            </span>
+      {/* "What Should I Do Today?" Daily Agenda Section */}
+      <section className="card card-section daily-agenda-section" aria-label="What Should I Do Today">
+        <div className="card-section-header">
+          <div>
+            <div className="section-pill">Actionable Daily Plan</div>
+            <h2 className="card-section-title">What Should I Do {todayDateLabel}?</h2>
+            <p className="card-section-subtitle">
+              Prioritized, concrete micro-steps generated by your coach. No vague instructions.
+            </p>
           </div>
+          <span className="badge-neutral">{todaySessions.length} session(s) scheduled</span>
+        </div>
 
-          <div className="spotlight-body">
-            <div className="spotlight-info">
-              <h2 className="spotlight-title">{nextSession.title}</h2>
-              <div className="spotlight-meta">
-                <span className="course-tag" style={{ borderColor: nextSession.courseColor }}>
-                  {nextSession.course}
-                </span>
-                <Badge variant={nextSession.priority}>{nextSession.priority} Priority</Badge>
-                <Badge variant={nextSession.difficulty}>{nextSession.difficulty} Difficulty</Badge>
-              </div>
-              <p className="spotlight-recommendation">{nextSession.recommendation}</p>
-            </div>
-
-            <div className="spotlight-action">
-              <button
-                type="button"
-                className="btn btn-success"
-                onClick={() => toggleSessionCompleted(nextSession.id)}
+        {todaySessions.length === 0 ? (
+          <div className="empty-placeholder">
+            <span>🎉</span>
+            <h3>No study session currently queued</h3>
+            <p>No study sessions scheduled for {todayDateLabel.toLowerCase()}.</p>
+            <p className="subtext">
+              Take time to recharge, or open the Adaptive Planner to generate your next study block.
+            </p>
+            <Link to="/study-planner" className="btn btn-secondary btn-sm" style={{ marginTop: '10px' }}>
+              Open Adaptive Planner
+            </Link>
+          </div>
+        ) : (
+          <div className="daily-agenda-list">
+            {todaySessions.map((session) => (
+              <div
+                key={session.id}
+                className={`daily-agenda-card ${session.completed ? 'session-completed' : ''}`}
+                style={{ borderLeftColor: session.courseColor || '#0284c7' }}
               >
-                Mark as Completed ✓
-              </button>
-            </div>
-          </div>
-        </section>
-      ) : (
-        <section className="spotlight-empty">
-          <div className="spotlight-empty-content">
-            <span className="empty-icon" aria-hidden="true">💡</span>
-            <div>
-              <h3>No study session currently queued</h3>
-              <p>
-                {courses.length === 0
-                  ? 'Get started by adding your semester courses and pending tasks!'
-                  : 'Configure your weekly availability in the Smart Planner to generate an optimized study plan.'}
-              </p>
-            </div>
-          </div>
-          <Link to="/study-planner" className="btn btn-secondary">
-            Go to Planner
-          </Link>
-        </section>
-      )}
+                <div className="agenda-card-top">
+                  <div className="agenda-time-pill">
+                    <strong>{session.startTime} – {session.endTime}</strong>
+                    <span>({session.sessionLength} min)</span>
+                  </div>
 
-      {/* Main Grid: Study Progress & Due Soon */}
-      <div className="dashboard-grid">
-        {/* Left Column: Progress & Workload */}
-        <div className="dashboard-column">
-          <section className="card card-section" aria-label="Study Plan Progress">
-            <div className="card-section-header">
-              <h2 className="card-section-title">Study Plan Execution</h2>
-              <span className="progress-badge">{studyProgressPercent}% Completed</span>
-            </div>
+                  <div className="agenda-course-info">
+                    <h3 className="agenda-task-title">{session.title}</h3>
+                    <div className="agenda-tag-row">
+                      <span className="course-tag" style={{ borderColor: session.courseColor }}>
+                        {session.course}
+                      </span>
+                      <Badge variant={session.priority}>{session.priority} Priority</Badge>
+                      <Badge variant={session.difficulty}>{session.difficulty} Difficulty</Badge>
+                    </div>
+                  </div>
 
-            <div className="progress-container">
-              <div className="progress-bar-track">
-                <div
-                  className="progress-bar-fill fill-cyan"
-                  style={{ width: `${studyProgressPercent}%` }}
-                  role="progressbar"
-                  aria-valuenow={studyProgressPercent}
-                  aria-valuemin="0"
-                  aria-valuemax="100"
-                />
-              </div>
-              <div className="progress-subtext">
-                <span>{completedSessionsCount} of {taskSessions.length} sessions completed</span>
-                {insights?.hasImpossibleSchedule && (
-                  <span className="text-warning">⚠ Schedule overload detected</span>
+                  <div className="agenda-action-col">
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${session.completed ? 'btn-secondary' : 'btn-success'}`}
+                      onClick={() => toggleSessionCompleted(session.id)}
+                    >
+                      {session.completed ? 'Undo ✓' : 'Mark Completed ✓'}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="agenda-recommendation">{session.recommendation}</p>
+
+                {/* Granular Concrete Micro-Steps */}
+                {session.actionBreakdown && session.actionBreakdown.length > 0 && (
+                  <div className="action-breakdown-box">
+                    <div className="breakdown-header">
+                      <span className="breakdown-icon">📋</span>
+                      <strong>Concrete Session Action Plan:</strong>
+                    </div>
+                    <ol className="action-steps-list">
+                      {session.actionBreakdown.map((step) => (
+                        <li key={step.step} className="action-step-item">
+                          <span className="step-num">{step.step}.</span>
+                          <span className="step-text">{step.action}</span>
+                          <span className="step-time">({step.duration} min)</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
                 )}
               </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Main Grid: Transparent Course Readiness & Deadlines */}
+      <div className="dashboard-grid">
+        {/* Left Column: Course Readiness Meters */}
+        <div className="dashboard-column">
+          <section className="card card-section" aria-label="Course Academic Readiness">
+            <div className="card-section-header">
+              <div>
+                <h2 className="card-section-title">Observable Course Readiness</h2>
+                <p className="card-section-subtitle">
+                  Calculated from topic coverage, homework completion, and self-reported confidence.
+                </p>
+              </div>
+              <Link to="/courses" className="section-link">Manage Syllabus →</Link>
             </div>
 
-            {insights?.unscheduledTasks?.length > 0 && (
-              <div className="warning-callout">
-                <strong>Schedule Warning:</strong> {insights.unscheduledTasks.length} task(s) could not fully fit before their deadlines. Consider adding more study slots.
+            {/* Transparent Disclaimer Box */}
+            <div className="readiness-disclaimer-card">
+              <span className="disclaimer-icon" aria-hidden="true">ℹ️</span>
+              <p>
+                <strong>Transparent Readiness Indicator:</strong> This score reflects your documented progress through syllabus topics and homework tasks. It is an organizational coaching metric, never a scientifically validated probability of passing an exam.
+              </p>
+            </div>
+
+            {courseReadinessList.length === 0 ? (
+              <div className="empty-placeholder">
+                <p>No courses registered yet. Add courses and syllabus topics to see your readiness.</p>
+                <Link to="/courses" className="btn btn-xs btn-outline">Add Courses</Link>
+              </div>
+            ) : (
+              <div className="readiness-cards-list">
+                {courseReadinessList.map((cr) => (
+                  <div key={cr.courseId} className="readiness-card">
+                    <div className="readiness-top-row">
+                      <div>
+                        <strong className="readiness-course-name">{cr.courseName}</strong>
+                        {cr.hasExamUrgency && (
+                          <span className="exam-urgency-tag">
+                            ⚠️ Exam in {cr.daysToNearestExam} days
+                          </span>
+                        )}
+                      </div>
+                      <div className="readiness-score-badge" style={{ backgroundColor: `${cr.tierColor}20`, color: cr.tierColor }}>
+                        {cr.readinessScore}% ({cr.tier})
+                      </div>
+                    </div>
+
+                    <div className="progress-bar-track">
+                      <div
+                        className="progress-bar-fill"
+                        style={{
+                          width: `${cr.readinessScore}%`,
+                          backgroundColor: cr.tierColor,
+                        }}
+                        role="progressbar"
+                        aria-valuenow={cr.readinessScore}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                      />
+                    </div>
+
+                    <div className="readiness-metrics-row">
+                      <span>📖 Topics: {cr.topicProgress.completed}/{cr.topicProgress.total}</span>
+                      <span>•</span>
+                      <span>📝 Tasks: {cr.assignmentProgress.completed}/{cr.assignmentProgress.total}</span>
+                      <span>•</span>
+                      <span>⭐ Confidence: {cr.avgConfidence}/5</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </section>
 
-          {/* Workload Breakdown */}
-          <section className="card card-section" aria-label="Course Workload Overview">
+          {/* Outstanding Topics Card */}
+          <section className="card card-section" aria-label="Outstanding Topics">
             <div className="card-section-header">
-              <h2 className="card-section-title">Course Workload Overview</h2>
-              <span className="badge-neutral">{courseWorkloadBreakdown.length} active courses</span>
+              <h2 className="card-section-title">Outstanding Syllabus Topics</h2>
+              <span className="badge-neutral">{outstandingTopics.length} need focus</span>
             </div>
 
-            {courseWorkloadBreakdown.length === 0 ? (
+            {outstandingTopics.length === 0 ? (
               <div className="empty-placeholder">
-                <p>No active assignments or exams to calculate workload from.</p>
-                <Link to="/assignments" className="btn btn-xs btn-outline">Add an Assignment</Link>
+                <p>All syllabus topics are currently practiced or have good confidence! 🌟</p>
               </div>
             ) : (
-              <div className="workload-list">
-                {courseWorkloadBreakdown.map((item) => (
-                  <div key={item.course.name} className="workload-item">
-                    <div className="workload-info">
-                      <strong className="workload-course-name">{item.course.name}</strong>
-                      <span className="workload-counts">
-                        {item.assignments} assignment(s) • {item.exams} exam(s)
-                      </span>
+              <div className="outstanding-topics-list">
+                {outstandingTopics.map((top) => (
+                  <div key={top.id} className="outstanding-topic-item">
+                    <div>
+                      <div className="outstanding-title">{top.title}</div>
+                      <div className="outstanding-meta">
+                        <span className="topic-course-badge">{top.courseName}</span>
+                        <span>• Week {top.week}</span>
+                        <span>• Status: {top.status === 'not_started' ? 'Not Started' : top.status}</span>
+                      </div>
                     </div>
-                    <div className="workload-hours">
-                      <span className="hours-value">~{item.estimatedHours}h</span>
-                      <span className="hours-label">est. workload</span>
-                    </div>
+                    <Link to="/courses" className="btn btn-xs btn-outline">
+                      Update →
+                    </Link>
                   </div>
                 ))}
               </div>
@@ -274,9 +461,9 @@ export function Dashboard() {
           </section>
         </div>
 
-        {/* Right Column: Due Soon & Upcoming Exams */}
+        {/* Right Column: Deadlines & Upcoming Exams */}
         <div className="dashboard-column">
-          {/* Urgent Deadlines */}
+          {/* Due Soon */}
           <section className="card card-section" aria-label="Tasks Due Soon">
             <div className="card-section-header">
               <h2 className="card-section-title">Due in the Next 7 Days</h2>
@@ -335,6 +522,36 @@ export function Dashboard() {
                     <Badge variant="exam">Exam</Badge>
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+
+          {/* Study Plan Progress Summary */}
+          <section className="card card-section" aria-label="Study Plan Progress">
+            <div className="card-section-header">
+              <h2 className="card-section-title">Weekly Study Plan Execution</h2>
+              <span className="progress-badge">{studyProgressPercent}% Done</span>
+            </div>
+
+            <div className="progress-container">
+              <div className="progress-bar-track">
+                <div
+                  className="progress-bar-fill fill-cyan"
+                  style={{ width: `${studyProgressPercent}%` }}
+                  role="progressbar"
+                  aria-valuenow={studyProgressPercent}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                />
+              </div>
+              <div className="progress-subtext">
+                <span>{completedSessionsCount} of {taskSessions.length} sessions completed ({totalPlannedHours}h total)</span>
+              </div>
+            </div>
+
+            {insights?.hasImpossibleSchedule && (
+              <div className="warning-callout" style={{ marginTop: '12px' }}>
+                <strong>Overload Notice:</strong> Total estimated workload exceeds available study hours prior to deadlines. Add more availability windows.
               </div>
             )}
           </section>

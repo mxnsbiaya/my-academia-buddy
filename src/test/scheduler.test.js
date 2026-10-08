@@ -228,4 +228,101 @@ describe('Scheduling Engine — Plan Generation & Constraints', () => {
     expect(breaks.length).toBeGreaterThan(0);
     expect(breaks[0].sessionLength).toBe(15);
   });
+
+  it('generates concrete 3-step action breakdowns for study sessions rather than vague blocks', () => {
+    const result = generateStudyPlan({
+      courses: [{ id: 1, name: 'CSI 2110', difficulty: 'High' }],
+      assignments: [
+        { id: 1, title: 'Graph Assignment', course: 'CSI 2110', dueDate: '2026-10-16', estimatedWorkload: 3 },
+      ],
+      availability: [{ id: 1, day: 'Monday', startTime: '13:00', endTime: '16:00' }],
+      startDate: fixedStartDate,
+    });
+
+    const taskSessions = result.plan.filter((s) => s.type !== 'Break');
+    expect(taskSessions.length).toBeGreaterThan(0);
+
+    const firstSession = taskSessions[0];
+    expect(firstSession.actionBreakdown).toBeDefined();
+    expect(firstSession.actionBreakdown.length).toBe(3);
+
+    // Sum of steps should equal the total session length
+    const totalStepMinutes = firstSession.actionBreakdown.reduce((sum, step) => sum + step.duration, 0);
+    expect(totalStepMinutes).toBe(firstSession.sessionLength);
+
+    // Verify concrete action text
+    expect(firstSession.actionBreakdown[0].action).toBeTruthy();
+    expect(firstSession.actionBreakdown[1].action).toBeTruthy();
+    expect(firstSession.actionBreakdown[2].action).toBeTruthy();
+  });
+
+  it('applies adaptive pace multiplier buffer when student pace is calibrated', () => {
+    const standardResult = generateStudyPlan({
+      courses: [{ id: 1, name: 'MAT 1722', difficulty: 'Medium' }],
+      assignments: [
+        { id: 1, title: 'Calculus Exercises', course: 'MAT 1722', dueDate: '2026-10-18', estimatedWorkload: 2 },
+      ],
+      availability: [{ id: 1, day: 'Monday', startTime: '13:00', endTime: '18:00' }],
+      startDate: fixedStartDate,
+      adaptiveSignals: { paceMultiplier: 1.0 },
+    });
+
+    const bufferedResult = generateStudyPlan({
+      courses: [{ id: 1, name: 'MAT 1722', difficulty: 'Medium' }],
+      assignments: [
+        { id: 1, title: 'Calculus Exercises', course: 'MAT 1722', dueDate: '2026-10-18', estimatedWorkload: 2 },
+      ],
+      availability: [{ id: 1, day: 'Monday', startTime: '13:00', endTime: '18:00' }],
+      startDate: fixedStartDate,
+      adaptiveSignals: { paceMultiplier: 1.25 },
+    });
+
+    expect(bufferedResult.insights.adaptivePaceApplied).toBe(1.25);
+    // Buffered session duration should be longer
+    const standardLength = standardResult.plan.find((s) => s.type !== 'Break').sessionLength;
+    const bufferedLength = bufferedResult.plan.find((s) => s.type !== 'Break').sessionLength;
+    expect(bufferedLength).toBeGreaterThan(standardLength);
+  });
+
+  it('supports emergency exam preparation mode when exams approach', () => {
+    const result = generateStudyPlan({
+      courses: [{ id: 1, name: 'CSI 2110', difficulty: 'High' }],
+      assignments: [
+        { id: 1, title: 'Homework 3', course: 'CSI 2110', dueDate: '2026-10-20', estimatedWorkload: 2 },
+      ],
+      exams: [
+        { id: 1, title: 'Midterm Exam', course: 'CSI 2110', date: '2026-10-15', estimatedWorkload: 6 },
+      ],
+      availability: [{ id: 1, day: 'Monday', startTime: '13:00', endTime: '18:00' }],
+      startDate: fixedStartDate,
+      emergencyExamMode: true,
+    });
+
+    expect(result.insights.emergencyModeActive).toBe(true);
+    const examSessions = result.plan.filter((s) => s.type === 'Exam Review');
+    expect(examSessions.length).toBeGreaterThan(0);
+    expect(examSessions[0].isEmergencyExam).toBe(true);
+  });
+
+  it('schedules dedicated study sessions for active syllabus topics', () => {
+    const result = generateStudyPlan({
+      courses: [{ id: 1, name: 'SEG 2105', difficulty: 'Medium' }],
+      syllabusTopics: [
+        {
+          id: 'topic-99',
+          courseName: 'SEG 2105',
+          week: 1,
+          title: 'Design Patterns & MVC',
+          status: 'not_started',
+          estimatedHours: 2.0,
+        },
+      ],
+      availability: [{ id: 1, day: 'Monday', startTime: '14:00', endTime: '17:00' }],
+      startDate: fixedStartDate,
+    });
+
+    const topicSessions = result.plan.filter((s) => s.title.includes('Design Patterns'));
+    expect(topicSessions.length).toBeGreaterThan(0);
+    expect(topicSessions[0].course).toBe('SEG 2105');
+  });
 });

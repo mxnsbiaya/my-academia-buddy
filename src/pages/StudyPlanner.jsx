@@ -13,6 +13,9 @@ export function StudyPlanner() {
     availability,
     studyPlan,
     insights,
+    adaptiveSignals,
+    emergencyExamMode,
+    toggleEmergencyExamMode,
     addAvailability,
     deleteAvailability,
     generatePlan,
@@ -107,6 +110,14 @@ export function StudyPlanner() {
         <div className="planner-header-actions">
           <button
             type="button"
+            className={`btn ${emergencyExamMode ? 'btn-danger' : 'btn-outline'}`}
+            onClick={toggleEmergencyExamMode}
+            title="Accelerate preparation for approaching exams"
+          >
+            {emergencyExamMode ? '🚨 Emergency Exam Mode ON' : '⚡ Emergency Exam Mode'}
+          </button>
+          <button
+            type="button"
             className="btn btn-primary"
             onClick={handleGenerateClick}
           >
@@ -123,6 +134,37 @@ export function StudyPlanner() {
           )}
         </div>
       </div>
+
+      {/* Emergency Exam Mode Active Banner */}
+      {emergencyExamMode && (
+        <div className="emergency-mode-banner" role="alert">
+          <div className="emergency-banner-icon">🚨</div>
+          <div className="emergency-banner-content">
+            <strong>Emergency Exam Preparation Mode Active:</strong>
+            <p>
+              The scheduler is dedicating 75% of available study slots to high-priority exam preparation. Non-urgent tasks are deferred to maximize retention for your nearest test.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-light"
+            onClick={toggleEmergencyExamMode}
+          >
+            Deactivate
+          </button>
+        </div>
+      )}
+
+      {/* Adaptive Pace Signal Banner */}
+      {adaptiveSignals?.paceMultiplier > 1.05 && (
+        <div className="coach-pace-banner">
+          <span className="pace-icon">🛡️</span>
+          <div>
+            <strong>Adaptive Pacing Active (+{Math.round((adaptiveSignals.paceMultiplier - 1) * 100)}% buffer):</strong>
+            <span> Study session lengths are calibrated with extra breathing room to accommodate observed pace and prevent schedule collapse.</span>
+          </div>
+        </div>
+      )}
 
       {/* AI / Algorithm Transparency Notice */}
       <div className="engine-transparency-card">
@@ -386,6 +428,12 @@ export function StudyPlanner() {
                             {item.type}
                           </Badge>
                           <Badge variant={item.priority}>{item.priority}</Badge>
+                          {item.isRescheduled && (
+                            <Badge variant="warning">Rescheduled</Badge>
+                          )}
+                          {item.isEmergencyExam && (
+                            <Badge variant="danger">Emergency Prep</Badge>
+                          )}
                         </div>
                         <p className="session-rec">{item.recommendation}</p>
                       </div>
@@ -400,6 +448,25 @@ export function StudyPlanner() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Concrete Micro-Step Action Breakdown */}
+                    {item.actionBreakdown && item.actionBreakdown.length > 0 && (
+                      <div className="action-breakdown-box">
+                        <div className="breakdown-header">
+                          <span className="breakdown-icon">📋</span>
+                          <strong>Session Action Breakdown (Concrete Steps):</strong>
+                        </div>
+                        <ol className="action-steps-list">
+                          {item.actionBreakdown.map((step) => (
+                            <li key={step.step} className="action-step-item">
+                              <span className="step-num">{step.step}.</span>
+                              <span className="step-text">{step.action}</span>
+                              <span className="step-time">({step.duration} min)</span>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
 
                     {/* Explainability Accordion */}
                     {item.explanation && (

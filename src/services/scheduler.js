@@ -1,10 +1,14 @@
 /**
- * Smart Study Planner Scheduling Engine — My Academia Buddy 2.0
+ * Smart Study Planner Scheduling Engine — My Academia Buddy 2.0 (Adaptive Coach Edition)
  * 
  * Deterministic, rule-based heuristic scheduler with:
  * - Constraint satisfaction (daily availability, 06:00-22:00 window, no overlaps)
  * - Multi-factor scoring (urgency, priority, difficulty, workload, exam urgency)
- * - Fairness penalty to distribute multi-session tasks across days
+ * - Topic-level granularity and prerequisite dependency ordering
+ * - Adaptive pace multiplier adjustment (calibrated by check-in signals)
+ * - Automatic rescheduling for missed or in-progress topics
+ * - Emergency Exam Preparation Mode
+ * - Concrete, granular task action breakdowns (not vague instructions)
  * - Preservation of completed sessions across plan regenerations
  * - Detailed explainability annotations for each session
  * - Impossible schedule detection and workload analysis
@@ -100,7 +104,7 @@ export function daysBetween(fromDate, toDate) {
 }
 
 /**
- * Formats a date into human-readable format e.g. "Monday, Oct 12"
+ * Formats a date into human-readable format e.g. "Mon, Oct 12"
  * @param {string} dateString
  * @returns {string}
  */
@@ -218,7 +222,7 @@ export function getSessionLength(difficulty, taskWeight) {
 
 /**
  * Fallback workload estimation when user has not entered hours
- * @param {"Assignment"|"Exam Review"|"Course Review"} type
+ * @param {"Assignment"|"Exam Review"|"Course Review"|"Topic Study"} type
  * @param {"High"|"Medium"|"Low"} difficulty
  * @param {"High"|"Medium"|"Low"} taskWeight
  * @returns {number} minutes
@@ -228,6 +232,12 @@ export function estimateTotalWorkMinutes(type, difficulty, taskWeight) {
     if (difficulty === 'High') return 360; // 6h
     if (difficulty === 'Medium') return 240; // 4h
     return 150; // 2.5h
+  }
+
+  if (type === 'Topic Study') {
+    if (difficulty === 'High') return 210; // 3.5h
+    if (difficulty === 'Medium') return 150; // 2.5h
+    return 90; // 1.5h
   }
 
   if (type === 'Course Review') {
@@ -244,6 +254,141 @@ export function estimateTotalWorkMinutes(type, difficulty, taskWeight) {
 }
 
 /**
+ * Generates concrete, granular action steps for a session rather than vague instructions
+ * 
+ * @param {object} task
+ * @param {number} sessionMinutes
+ * @returns {Array<{ step: string, duration: number, details: string }>}
+ */
+export function generateGranularActionBreakdown(task, sessionMinutes = 60) {
+  const isExam = task.type === 'Exam Review';
+  const isEmergency = Boolean(task.isEmergencyMode);
+  const isTopic = task.type === 'Topic Study';
+
+  if (isEmergency) {
+    const part1 = Math.round(sessionMinutes * 0.3);
+    const part2 = Math.round(sessionMinutes * 0.5);
+    const part3 = sessionMinutes - part1 - part2;
+    return [
+      {
+        step: 1,
+        title: 'High-Yield Formula & Concept Review',
+        action: 'Review critical cheat sheets, core theorems, and recurring exam problem patterns.',
+        details: 'Review critical cheat sheets, core theorems, and recurring exam problem patterns.',
+        duration: part1,
+      },
+      {
+        step: 2,
+        title: 'Timed Mock Practice Problems',
+        action: 'Solve exam-level questions under timed conditions without checking solutions.',
+        details: 'Solve exam-level questions under timed conditions without checking solutions.',
+        duration: part2,
+      },
+      {
+        step: 3,
+        title: 'Targeted Mistake Analysis & Fixes',
+        action: 'Trace errors, verify edge cases, and solidify weak problem-solving steps.',
+        details: 'Trace errors, verify edge cases, and solidify weak problem-solving steps.',
+        duration: part3,
+      },
+    ];
+  }
+
+  if (isExam) {
+    const part1 = Math.round(sessionMinutes * 0.25);
+    const part2 = Math.round(sessionMinutes * 0.55);
+    const part3 = sessionMinutes - part1 - part2;
+    return [
+      {
+        step: 1,
+        title: 'Active Recall & Topic Mapping',
+        action: 'Recall key definitions and structures without looking at textbook notes.',
+        details: 'Recall key definitions and structures without looking at textbook notes.',
+        duration: part1,
+      },
+      {
+        step: 2,
+        title: 'Practice Exercises & Derivations',
+        action: 'Complete end-of-chapter problems and previous midterm sample questions.',
+        details: 'Complete end-of-chapter problems and previous midterm sample questions.',
+        duration: part2,
+      },
+      {
+        step: 3,
+        title: 'Self-Quiz & Summary',
+        action: 'Write down a 1-page summary sheet of concepts mastered during this block.',
+        details: 'Write down a 1-page summary sheet of concepts mastered during this block.',
+        duration: part3,
+      },
+    ];
+  }
+
+  if (isTopic) {
+    const part1 = Math.round(sessionMinutes * 0.3);
+    const part2 = Math.round(sessionMinutes * 0.5);
+    const part3 = sessionMinutes - part1 - part2;
+    const readingDetails = task.requiredReadings
+      ? `Read & annotate: ${task.requiredReadings}`
+      : 'Synthesize core lecture slide points into organized Cornell notes.';
+    const practiceDetails = task.practiceProblems
+      ? `Solve assigned problems: ${task.practiceProblems}`
+      : 'Work through worked examples and textbook practice questions.';
+
+    return [
+      {
+        step: 1,
+        title: 'Lecture Slide & Reading Synthesis',
+        action: readingDetails,
+        details: readingDetails,
+        duration: part1,
+      },
+      {
+        step: 2,
+        title: 'Applied Problem Solving',
+        action: practiceDetails,
+        details: practiceDetails,
+        duration: part2,
+      },
+      {
+        step: 3,
+        title: 'Checkpoint Verification',
+        action: 'Verify answers, document questions for TA office hours, and rate confidence.',
+        details: 'Verify answers, document questions for TA office hours, and rate confidence.',
+        duration: part3,
+      },
+    ];
+  }
+
+  // Default assignment step breakdown
+  const part1 = Math.round(sessionMinutes * 0.2);
+  const part2 = Math.round(sessionMinutes * 0.6);
+  const part3 = sessionMinutes - part1 - part2;
+  return [
+    {
+      step: 1,
+      title: 'Requirement Breakdown & Planning',
+      action: 'Review rubric, set clear milestone criteria, and draft outline or pseudocode.',
+      details: 'Review rubric, set clear milestone criteria, and draft outline or pseudocode.',
+      duration: part1,
+    },
+    {
+      step: 2,
+      title: 'Focused Implementation / Writing',
+      action: 'Deep work block: build milestone deliverables with zero distractions.',
+      details: 'Deep work block: build milestone deliverables with zero distractions.',
+      duration: part2,
+    },
+    {
+      step: 3,
+      title: 'Testing, Review & Verification',
+      action: 'Test edge cases, format according to instructions, and save clean checkpoints.',
+      details: 'Test edge cases, format according to instructions, and save clean checkpoints.',
+      duration: part3,
+    },
+  ];
+}
+
+/**
  * Computes the multi-factor scheduling priority score for a task on a specific session date
  * @param {object} task
  * @param {Date} sessionDate
@@ -256,8 +401,8 @@ export function getTaskScore(task, sessionDate, dailyCount = 0) {
 
   // 1. Urgency score (exponential decay curve as deadline approaches)
   let urgencyScore = 1;
-  if (daysLeft <= 0) urgencyScore = 15;
-  else if (daysLeft === 1) urgencyScore = 12;
+  if (daysLeft <= 0) urgencyScore = 16;
+  else if (daysLeft === 1) urgencyScore = 13;
   else if (daysLeft <= 2) urgencyScore = 10;
   else if (daysLeft <= 4) urgencyScore = 8;
   else if (daysLeft <= 7) urgencyScore = 6;
@@ -271,9 +416,18 @@ export function getTaskScore(task, sessionDate, dailyCount = 0) {
   const workloadScore = (LEVEL_VALUE[task.taskWeight] || 2) * 1.5;
 
   // 4. Fixed exam urgency bonus
-  const examBonus = task.type === 'Exam Review' ? 3.0 : 0;
+  const examBonus = task.type === 'Exam Review' ? 4.0 : 0;
 
-  // 5. Fairness penalties:
+  // 5. Emergency Exam Prep Mode Bonus
+  const emergencyBonus = task.isEmergencyMode ? 8.0 : 0;
+
+  // 6. Missed / Rescheduled Priority Boost
+  const missedBoost = task.isMissedRescheduled ? 6.0 : 0;
+
+  // 7. Prerequisite bonus (if this task is a prerequisite for upcoming tasks)
+  const prereqBonus = task.isPrerequisite ? 4.0 : 0;
+
+  // 8. Fairness penalties:
   // - High penalty if already scheduled on the same calendar day (encourages spaced repetition)
   const sameDayPenalty = dailyCount * 4.0;
   // - General repetition penalty to allow other subjects to make progress
@@ -284,7 +438,10 @@ export function getTaskScore(task, sessionDate, dailyCount = 0) {
     priorityScore +
     difficultyScore +
     workloadScore +
-    examBonus -
+    examBonus +
+    emergencyBonus +
+    missedBoost +
+    prereqBonus -
     sameDayPenalty -
     repetitionPenalty
   );
@@ -345,15 +502,29 @@ export function buildPlanningSlots(availability, lastDeadline, startDate = new D
 }
 
 /**
- * Extracts and prepares tasks from courses, assignments, and exams
+ * Extracts and prepares tasks from courses, assignments, exams, and syllabus topics
+ * 
  * @param {object} params
  * @param {Array} params.courses
  * @param {Array} params.assignments
  * @param {Array} params.exams
- * @param {Array} [params.completedSessions] Already completed sessions to discount
+ * @param {Array} [params.syllabusTopics]
+ * @param {Array} [params.completedSessions]
+ * @param {object} [params.adaptiveSignals]
+ * @param {Array} [params.missedTopicIds] Topics flagged in check-in needing priority catch-up
+ * @param {boolean} [params.emergencyExamMode]
  * @returns {Array} List of normalized task objects
  */
-export function buildNormalizedTasks({ courses = [], assignments = [], exams = [], completedSessions = [] }) {
+export function buildNormalizedTasks({
+  courses = [],
+  assignments = [],
+  exams = [],
+  syllabusTopics = [],
+  completedSessions = [],
+  adaptiveSignals = null,
+  missedTopicIds = [],
+  emergencyExamMode = false,
+}) {
   const tasks = [];
 
   // Index course details for lookup
@@ -361,6 +532,8 @@ export function buildNormalizedTasks({ courses = [], assignments = [], exams = [
   courses.forEach((c) => {
     courseMap[c.name] = c;
   });
+
+  const paceMultiplier = adaptiveSignals?.paceMultiplier || 1.0;
 
   // Calculate completed minutes per task from existing sessions
   const completedMinutesByTask = {};
@@ -370,6 +543,8 @@ export function buildNormalizedTasks({ courses = [], assignments = [], exams = [
         (completedMinutesByTask[session.taskId] || 0) + Number(session.sessionLength);
     }
   });
+
+  const missedSet = new Set(missedTopicIds || []);
 
   // 1. Pending Assignments
   assignments
@@ -381,11 +556,16 @@ export function buildNormalizedTasks({ courses = [], assignments = [], exams = [
       const taskWeight = estimateTaskWeight(assignment.title);
       const category = getCourseCategory(courseName);
 
-      // User estimated hours takes precedence, fallback to heuristic
-      const totalMinutes =
+      // Course-specific velocity multiplier if available
+      const courseMultiplier = adaptiveSignals?.observedVelocityByCourse?.[courseName] || paceMultiplier;
+
+      // Base minutes scaled by adaptive velocity
+      const baseMinutes =
         assignment.estimatedWorkload && Number(assignment.estimatedWorkload) > 0
           ? Math.round(Number(assignment.estimatedWorkload) * 60)
           : estimateTotalWorkMinutes('Assignment', difficulty, taskWeight);
+
+      const totalMinutes = Math.round(baseMinutes * courseMultiplier);
 
       const taskId = `assignment-${assignment.id}`;
       const completedSoFar = completedMinutesByTask[taskId] || 0;
@@ -403,10 +583,12 @@ export function buildNormalizedTasks({ courses = [], assignments = [], exams = [
         difficulty,
         taskWeight,
         category,
-        sessionLength: getSessionLength(difficulty, taskWeight),
+        sessionLength: Math.max(30, Math.round(getSessionLength(difficulty, taskWeight) * courseMultiplier)),
         totalMinutes,
         remainingMinutes,
         sessionsScheduled: 0,
+        isEmergencyMode: emergencyExamMode,
+        isMissedRescheduled: false,
       });
     });
 
@@ -417,10 +599,14 @@ export function buildNormalizedTasks({ courses = [], assignments = [], exams = [
     const difficulty = courseObj?.difficulty || estimateCourseDifficulty(courseName);
     const category = getCourseCategory(courseName);
 
-    const totalMinutes =
+    const courseMultiplier = adaptiveSignals?.observedVelocityByCourse?.[courseName] || paceMultiplier;
+
+    const baseMinutes =
       exam.estimatedWorkload && Number(exam.estimatedWorkload) > 0
         ? Math.round(Number(exam.estimatedWorkload) * 60)
         : estimateTotalWorkMinutes('Exam Review', difficulty, 'High');
+
+    const totalMinutes = Math.round(baseMinutes * courseMultiplier);
 
     const taskId = `exam-${exam.id}`;
     const completedSoFar = completedMinutesByTask[taskId] || 0;
@@ -439,14 +625,70 @@ export function buildNormalizedTasks({ courses = [], assignments = [], exams = [
       difficulty,
       taskWeight: 'High',
       category,
-      sessionLength: getSessionLength(difficulty, 'High'),
+      sessionLength: Math.max(30, Math.round(getSessionLength(difficulty, 'High') * courseMultiplier)),
       totalMinutes,
       remainingMinutes,
       sessionsScheduled: 0,
+      isEmergencyMode: emergencyExamMode || Boolean(exam.isUrgent),
+      isMissedRescheduled: false,
     });
   });
 
-  // 3. Fallback: If no pending assignments or exams, schedule weekly review for active courses
+  // 3. Syllabus Topics (Adaptive Coach Feature)
+  // Schedule topics that are not yet marked as 'reviewed'
+  const activeTopics = syllabusTopics.filter(
+    (t) => t.status !== 'reviewed'
+  );
+
+  activeTopics.forEach((topic) => {
+    const courseObj = courseMap[topic.courseName];
+    const difficulty = courseObj?.difficulty || estimateCourseDifficulty(topic.courseName);
+    const category = getCourseCategory(topic.courseName);
+
+    const courseMultiplier = adaptiveSignals?.observedVelocityByCourse?.[topic.courseName] || paceMultiplier;
+
+    // Estimate minutes for topic completion
+    const baseMinutes = topic.estimatedHours
+      ? Math.round(Number(topic.estimatedHours) * 60)
+      : estimateTotalWorkMinutes('Topic Study', difficulty, 'Medium');
+
+    const totalMinutes = Math.round(baseMinutes * courseMultiplier);
+
+    const taskId = `topic-${topic.id}`;
+    const completedSoFar = completedMinutesByTask[taskId] || 0;
+    const remainingMinutes = Math.max(0, totalMinutes - completedSoFar);
+
+    // Target date defaults to 7 days ahead for current week topics
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + (topic.weekNumber ? topic.weekNumber * 3 : 7));
+
+    const isMissed = missedSet.has(topic.id);
+
+    tasks.push({
+      id: taskId,
+      sourceId: topic.id,
+      type: 'Topic Study',
+      title: `${topic.courseName}: ${topic.title}`,
+      course: topic.courseName,
+      courseColor: courseObj?.color || '#10b981',
+      date: toLocalDateString(targetDate),
+      priority: isMissed ? 'High' : (difficulty === 'High' ? 'High' : 'Medium'),
+      difficulty,
+      taskWeight: 'Medium',
+      category,
+      requiredReadings: topic.requiredReadings,
+      practiceProblems: topic.practiceProblems,
+      sessionLength: Math.max(30, Math.round(getSessionLength(difficulty, 'Medium') * courseMultiplier)),
+      totalMinutes,
+      remainingMinutes,
+      sessionsScheduled: 0,
+      isEmergencyMode: emergencyExamMode,
+      isMissedRescheduled: isMissed,
+      isPrerequisite: (topic.prerequisiteTopicIds || []).length > 0,
+    });
+  });
+
+  // 4. Fallback: If no tasks found at all, schedule general course review
   if (tasks.length === 0 && courses.length > 0) {
     const fallbackDate = new Date();
     fallbackDate.setDate(fallbackDate.getDate() + 7);
@@ -475,6 +717,8 @@ export function buildNormalizedTasks({ courses = [], assignments = [], exams = [
         totalMinutes,
         remainingMinutes,
         sessionsScheduled: 0,
+        isEmergencyMode: false,
+        isMissedRescheduled: false,
       });
     });
   }
@@ -483,15 +727,19 @@ export function buildNormalizedTasks({ courses = [], assignments = [], exams = [
 }
 
 /**
- * Main Study Plan Generation Engine
+ * Main Study Plan Generation Engine — Adaptive Coach Edition
  * 
  * @param {object} options
  * @param {Array} options.courses
  * @param {Array} options.assignments
  * @param {Array} options.exams
  * @param {Array} options.availability
+ * @param {Array} [options.syllabusTopics]
  * @param {Array} [options.existingPlan] Existing plan to preserve completed work from
  * @param {boolean} [options.preserveCompleted=true]
+ * @param {object} [options.adaptiveSignals]
+ * @param {Array} [options.missedTopicIds]
+ * @param {boolean} [options.emergencyExamMode=false]
  * @param {Date} [options.startDate]
  * @returns {{ plan: Array, insights: object, errors: Array }}
  */
@@ -500,8 +748,12 @@ export function generateStudyPlan({
   assignments = [],
   exams = [],
   availability = [],
+  syllabusTopics = [],
   existingPlan = [],
   preserveCompleted = true,
+  adaptiveSignals = null,
+  missedTopicIds = [],
+  emergencyExamMode = false,
   startDate = new Date(),
 }) {
   if (!availability || availability.length === 0) {
@@ -512,6 +764,9 @@ export function generateStudyPlan({
     };
   }
 
+  // Adaptive pace multiplier (1.0x to 1.5x)
+  const paceMultiplier = Math.max(1.0, Math.min(1.5, adaptiveSignals?.paceMultiplier || 1.0));
+
   // Preserve completed sessions if requested
   const preservedCompletedSessions = preserveCompleted
     ? existingPlan.filter((s) => s.completed)
@@ -521,14 +776,18 @@ export function generateStudyPlan({
     courses,
     assignments,
     exams,
+    syllabusTopics,
     completedSessions: preservedCompletedSessions,
+    adaptiveSignals,
+    missedTopicIds,
+    emergencyExamMode,
   });
 
   if (tasks.length === 0) {
     return {
       plan: preservedCompletedSessions,
       insights: null,
-      errors: ['No courses, pending assignments, or exams found to plan for.'],
+      errors: ['No courses, pending assignments, exams, or syllabus topics found to plan for.'],
     };
   }
 
@@ -562,7 +821,6 @@ export function generateStudyPlan({
 
   // Track daily session count per task for fair spaced repetition
   const dailyTaskCount = {};
-
   const newGeneratedSessions = [];
 
   slots.forEach((slot) => {
@@ -623,27 +881,36 @@ export function generateStudyPlan({
       // Deterministic unique ID
       const sessionId = `session-${chosenTask.id}-${slot.date}-${sessionStart}`;
 
+      // Granular action breakdown
+      const actionBreakdown = generateGranularActionBreakdown(chosenTask, sessionLength);
+
       // Build explainability rationale
       const explanation = [
-        `${chosenTask.title} was scheduled using urgency, priority (${chosenTask.priority}), difficulty (${chosenTask.difficulty}), and workload metrics.`,
+        `${chosenTask.title} was scheduled using urgency, priority (${chosenTask.priority}), difficulty (${chosenTask.difficulty}), and adaptive pacing.`,
         daysUntilDue !== null
           ? daysUntilDue === 0
             ? 'Due today! Highest scheduling urgency.'
             : `${daysUntilDue} day(s) remain until the deadline/exam.`
-          : 'No explicit deadline specified; scheduled by relative priority.',
-        `Assigned ${sessionLength} minutes within your ${slot.day} window (${slot.startTime}-${slot.endTime}).`,
+          : 'Scheduled based on syllabus progression and priority.',
+        chosenTask.isEmergencyMode
+          ? '⚡ Scheduled under Emergency Exam Mode: prioritizes high-yield mock problems before the exam.'
+          : chosenTask.isMissedRescheduled
+          ? '🔄 Rescheduled from your weekly check-in feedback to keep you on track.'
+          : `Assigned ${sessionLength} minutes within your ${slot.day} window (${slot.startTime}-${slot.endTime}).`,
         chosenTask.sessionsScheduled > 0
-          ? `Session #${chosenTask.sessionsScheduled + 1} for this task (distributed across days to promote spaced learning).`
+          ? `Session #${chosenTask.sessionsScheduled + 1} for this topic (distributed across days to promote spaced learning).`
           : 'First dedicated study block scheduled for this topic.',
       ];
 
       const recommendation =
-        chosenTask.type === 'Exam Review'
+        chosenTask.isEmergencyMode
+          ? 'Emergency Exam Focus: Prioritize high-yield review, formula sheets, and timed sample questions.'
+          : chosenTask.type === 'Exam Review'
           ? 'Focus on active recall, concept mapping, and practicing timed mock problems.'
+          : chosenTask.type === 'Topic Study'
+          ? 'Synthesize lecture notes, work through textbook problem sets, and verify solutions.'
           : chosenTask.category === 'Programming / Software'
-          ? 'Implement core features, test edge cases, and review code modularity.'
-          : chosenTask.category === 'Mathematics'
-          ? 'Work through step-by-step example derivations and assignment problems.'
+          ? 'Implement core modules, test edge cases, and review code structure.'
           : 'Produce concrete milestone progress and review key notes.';
 
       newGeneratedSessions.push({
@@ -666,6 +933,10 @@ export function generateStudyPlan({
         completed: false,
         recommendation,
         explanation,
+        actionBreakdown,
+        isEmergencyMode: chosenTask.isEmergencyMode,
+        isEmergencyExam: Boolean(chosenTask.isEmergencyMode && chosenTask.type === 'Exam Review'),
+        isMissedRescheduled: chosenTask.isMissedRescheduled,
       });
 
       chosenTask.remainingMinutes -= sessionLength;
@@ -695,6 +966,10 @@ export function generateStudyPlan({
           completed: false,
           recommendation: 'Step away from screens, hydrate, and stretch before your next session.',
           explanation: ['15-minute interval scheduled between intensive learning blocks to maximize retention.'],
+          actionBreakdown: [
+            { step: 'Hydrate & Stretch', duration: 5, details: 'Stand up, walk around, rest your eyes.' },
+            { step: 'Mental Reset', duration: 10, details: 'Avoid heavy reading or phone doom-scrolling.' },
+          ],
         });
         currentTime += BREAK_MINUTES;
       }
@@ -749,6 +1024,8 @@ export function generateStudyPlan({
     categories,
     unscheduledTasks,
     hasImpossibleSchedule: unscheduledTasks.length > 0,
+    emergencyModeActive: emergencyExamMode,
+    adaptivePaceApplied: paceMultiplier,
     recommendation:
       unscheduledTasks.length === 0
         ? 'All planned workload successfully fitted into your availability before deadlines.'

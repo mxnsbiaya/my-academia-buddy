@@ -6,6 +6,8 @@ import Courses from '../pages/Courses';
 import Assignments from '../pages/Assignments';
 import Exams from '../pages/Exams';
 import Dashboard from '../pages/Dashboard';
+import { CheckInModal } from '../components/CheckInModal';
+import { ProfileModal } from '../components/ProfileModal';
 
 function renderWithProviders(ui) {
   return render(
@@ -97,6 +99,26 @@ describe('Component Integration Tests', () => {
       expect(screen.getByText('Active Courses')).toBeInTheDocument();
       expect(screen.getByText('Pending Assignments')).toBeInTheDocument();
       expect(screen.getByText(/No study session currently queued/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('Academic Coach Modals', () => {
+    it('renders Weekly Check-In Modal and allows navigating questions', () => {
+      renderWithProviders(<CheckInModal isOpen={true} onClose={() => {}} />);
+
+      expect(screen.getByText(/Weekly Academic Check-In/i)).toBeInTheDocument();
+      expect(screen.getByText(/Completed/i)).toBeInTheDocument();
+      expect(screen.getByText(/Partially/i)).toBeInTheDocument();
+      expect(screen.getByText(/Not Started/i)).toBeInTheDocument();
+    });
+
+    it('renders Student Profile Modal with adaptive signals and commitments', () => {
+      renderWithProviders(<ProfileModal isOpen={true} onClose={() => {}} />);
+
+      expect(screen.getByText(/Student Profile & Coach Preferences/i)).toBeInTheDocument();
+      expect(screen.getByText(/Observed Adaptive Signals/i)).toBeInTheDocument();
+      expect(screen.getByText(/Completion Consistency/i)).toBeInTheDocument();
+      expect(screen.getByText(/Pace Buffer Multiplier/i)).toBeInTheDocument();
     });
   });
 });
