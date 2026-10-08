@@ -146,6 +146,9 @@ export function Dashboard() {
           </p>
         </div>
         <div className="header-actions">
+          <Link to="/syllabus-import" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>📑</span> Import Syllabus
+          </Link>
           <button
             type="button"
             className="btn btn-secondary"

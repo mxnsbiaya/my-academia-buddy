@@ -15,6 +15,7 @@ import Courses from './pages/Courses';
 import Assignments from './pages/Assignments';
 import Exams from './pages/Exams';
 import StudyPlanner from './pages/StudyPlanner';
+import SyllabusImport from './pages/SyllabusImport';
 
 import './App.css';
 
@@ -52,6 +53,7 @@ function AppContent() {
               <Route path="/assignments" element={<Assignments />} />
               <Route path="/exams" element={<Exams />} />
               <Route path="/study-planner" element={<StudyPlanner />} />
+              <Route path="/syllabus-import" element={<SyllabusImport />} />
             </Routes>
           </main>
         </div>

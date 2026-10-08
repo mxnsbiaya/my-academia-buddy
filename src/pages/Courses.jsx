@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../context/useApp';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
@@ -256,12 +257,21 @@ export function Courses() {
 
   return (
     <div className="page-container">
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 className="page-title">Course & Syllabus Management</h1>
           <p className="page-subtitle">
             Configure courses, maintain weekly syllabus topics, and record observable mastery progress.
           </p>
+        </div>
+        <div>
+          <Link
+            to="/syllabus-import"
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px', fontWeight: 600 }}
+          >
+            <span>📑</span> Intelligent Syllabus Import (PDF)
+          </Link>
         </div>
       </div>
 

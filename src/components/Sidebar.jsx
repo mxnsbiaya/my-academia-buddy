@@ -65,6 +65,14 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
             {courses.length > 0 && <span className="nav-counter">{courses.length}</span>}
           </NavLink>
 
+          <NavLink to="/syllabus-import" className={getLinkClass} onClick={onClose}>
+            <span className="nav-icon" aria-hidden="true">📑</span>
+            <span className="nav-label">Import Syllabus</span>
+            <span className="nav-counter" style={{ backgroundColor: 'rgba(56, 189, 248, 0.2)', color: 'var(--accent-cyan)' }}>
+              Auto
+            </span>
+          </NavLink>
+
           <NavLink to="/assignments" className={getLinkClass} onClick={onClose}>
             <span className="nav-icon" aria-hidden="true">📝</span>
             <span className="nav-label">Assignments</span>

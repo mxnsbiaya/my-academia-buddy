@@ -19,6 +19,15 @@ import {
 } from '../services/coach';
 import { AppContext } from './AppContextDefinition';
 
+const IMPORT_PRESET_COLORS = [
+  '#3b82f6', // Blue
+  '#8b5cf6', // Purple
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#06b6d4', // Cyan
+  '#ec4899', // Pink
+];
+
 export function AppProvider({ children }) {
   // Initialize storage migration once
   useEffect(() => {
@@ -507,6 +516,120 @@ export function AppProvider({ children }) {
     [addToast]
   );
 
+  // --- Intelligent Syllabus Import Semester Setup ---
+  const importSemesterFromSyllabi = useCallback(
+    ({ courses: newCoursesList = [], replaceExisting = false }) => {
+      let baseCourses = replaceExisting ? [] : [...courses];
+      let baseTopics = replaceExisting ? [] : [...syllabusTopics];
+      let baseAssignments = replaceExisting ? [] : [...assignments];
+      let baseExams = replaceExisting ? [] : [...exams];
+
+      let addedCourseCount = 0;
+      let addedTopicCount = 0;
+      let addedAssignmentCount = 0;
+      let addedExamCount = 0;
+
+      newCoursesList.forEach((imported, idx) => {
+        const courseId = Date.now() + idx + Math.floor(Math.random() * 1000);
+        const courseObj = {
+          id: courseId,
+          name: imported.name || imported.courseCode || `Course ${idx + 1}`,
+          instructor: imported.instructor || '',
+          schedule: imported.schedule || '',
+          credits: imported.credits || '3.0',
+          difficulty: imported.difficulty || 'Medium',
+          color: imported.color || IMPORT_PRESET_COLORS[idx % IMPORT_PRESET_COLORS.length],
+          createdAt: new Date().toISOString(),
+          gradingScheme: imported.gradingScheme || [],
+        };
+        baseCourses.push(courseObj);
+        addedCourseCount++;
+
+        // Add weekly topics
+        if (imported.topics && imported.topics.length > 0) {
+          imported.topics.forEach((t, tIdx) => {
+            const topicObj = {
+              id: `topic-${Date.now()}-${idx}-${tIdx}`,
+              courseId: courseId,
+              courseName: courseObj.name,
+              weekNumber: Number(t.weekNumber) || (tIdx + 1),
+              title: t.title?.trim() || `Week ${tIdx + 1} Lecture`,
+              description: t.description?.trim() || '',
+              requiredReadings: t.requiredReadings?.trim() || '',
+              practiceProblems: t.practiceProblems?.trim() || '',
+              estimatedHours: Number(t.estimatedHours) || 3.0,
+              prerequisiteTopicIds: [],
+              status: 'not_started',
+              confidence: 3,
+              lastUpdated: new Date().toISOString(),
+            };
+            baseTopics.push(topicObj);
+            addedTopicCount++;
+          });
+        }
+
+        // Add assignments
+        if (imported.assignments && imported.assignments.length > 0) {
+          imported.assignments.forEach((a, aIdx) => {
+            const asgObj = {
+              id: `asg-${Date.now()}-${idx}-${aIdx}`,
+              title: a.title?.trim() || `Assignment ${aIdx + 1}`,
+              course: courseObj.name,
+              dueDate: a.dueDate || '',
+              priority: a.priority || (a.weightPercent && a.weightPercent >= 15 ? 'High' : 'Medium'),
+              estimatedWorkload: a.estimatedWorkload || (a.weightPercent && a.weightPercent >= 15 ? 6 : 4),
+              weightPercent: a.weightPercent || null,
+              completed: false,
+              createdAt: new Date().toISOString(),
+            };
+            baseAssignments.push(asgObj);
+            addedAssignmentCount++;
+          });
+        }
+
+        // Add exams
+        if (imported.exams && imported.exams.length > 0) {
+          imported.exams.forEach((e, eIdx) => {
+            const examObj = {
+              id: `exam-${Date.now()}-${idx}-${eIdx}`,
+              title: e.title?.trim() || 'Exam',
+              course: courseObj.name,
+              date: e.date || '',
+              location: e.location?.trim() || '',
+              notes: e.notes || (e.weightPercent ? `Grading weight: ${e.weightPercent}%` : ''),
+              priority: 'High',
+              estimatedWorkload: e.estimatedWorkload || 8,
+              weightPercent: e.weightPercent || null,
+              createdAt: new Date().toISOString(),
+            };
+            baseExams.push(examObj);
+            addedExamCount++;
+          });
+        }
+      });
+
+      setCourses(baseCourses);
+      setSyllabusTopics(baseTopics);
+      setAssignments(baseAssignments);
+      setExams(baseExams);
+
+      addToast(
+        `🎉 Semester configured! Added ${addedCourseCount} course(s), ${addedTopicCount} syllabus topics, ${addedAssignmentCount} assignments, and ${addedExamCount} exams.`,
+        'success',
+        7000
+      );
+
+      return {
+        success: true,
+        addedCourseCount,
+        addedTopicCount,
+        addedAssignmentCount,
+        addedExamCount,
+      };
+    },
+    [courses, syllabusTopics, assignments, exams, addToast]
+  );
+
   // --- Global Backup & Demo Operations ---
   const handleLoadScenario = useCallback(
     (scenarioType = 'consistent') => {
@@ -648,6 +771,7 @@ export function AppProvider({ children }) {
       closeOnboardingModal,
       exportData: exportAllData,
       importData: handleImportBackup,
+      importSemesterFromSyllabi,
     }),
     [
       courses,
@@ -699,6 +823,7 @@ export function AppProvider({ children }) {
       handleLoadScenario,
       handleClearAll,
       handleImportBackup,
+      importSemesterFromSyllabi,
     ]
   );
 
