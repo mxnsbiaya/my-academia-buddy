@@ -298,7 +298,7 @@ export function mergeSyllabusCourse({
 
   const addedAssignments = [];
   (incomingCourse.assignments || []).forEach((a, idx) => {
-    if (!currentAsgKeys.has(normTitle(a.title))) {
+    if (a.confirmed !== false && !a.rejected && !currentAsgKeys.has(normTitle(a.title))) {
       addedAssignments.push({
         id: `asg-${Date.now()}-${idx}`,
         courseId,
@@ -322,7 +322,7 @@ export function mergeSyllabusCourse({
 
   const addedExams = [];
   (incomingCourse.exams || []).forEach((e, idx) => {
-    if (!currentExamKeys.has(normTitle(e.title))) {
+    if (e.confirmed !== false && !e.rejected && !currentExamKeys.has(normTitle(e.title))) {
       addedExams.push({
         id: `exam-${Date.now()}-${idx}`,
         courseId,

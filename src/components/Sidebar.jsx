@@ -16,6 +16,7 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
     openCheckInModal,
     openProfileModal,
     openAuthModal,
+    openHelpModal,
     syncStatus,
   } = useApp();
 
@@ -138,6 +139,18 @@ export function Sidebar({ isOpen, onClose, onOpenDataModal }) {
           >
             <span className="nav-icon" aria-hidden="true">👤</span>
             <span className="nav-label">{t('nav_profile')}</span>
+          </button>
+
+          <button
+            type="button"
+            className="sidebar-coach-nav-btn"
+            onClick={() => {
+              if (onClose) onClose();
+              openHelpModal();
+            }}
+          >
+            <span className="nav-icon" aria-hidden="true">❓</span>
+            <span className="nav-label">{t('nav_help_tour')}</span>
           </button>
         </nav>
 

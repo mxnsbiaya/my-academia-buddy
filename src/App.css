@@ -3826,3 +3826,490 @@
   font-weight: 700;
   border-color: var(--accent-cyan);
 }
+
+/* ==========================================================================
+   Phase 4.1: Guided Onboarding Wizard, Product Tour & Help Modal Styles
+   ========================================================================== */
+
+/* Guided Onboarding Wizard Container */
+.onboarding-wizard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 480px;
+}
+
+.onboarding-stepper-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  gap: 8px;
+}
+
+.onboarding-step-pill {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.onboarding-step-pill:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.onboarding-step-pill.active {
+  background: var(--accent-cyan);
+  color: #042f2e;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+}
+
+.onboarding-step-pill.completed {
+  color: #34d399;
+}
+
+.onboarding-connector {
+  color: var(--text-muted);
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+.onboarding-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(30, 41, 59, 0.7) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: var(--radius-md);
+  margin-bottom: 6px;
+}
+
+.onboarding-hero-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.onboarding-heading {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 4px;
+}
+
+.onboarding-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Step 1: Select Cards Grid */
+.onboarding-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.onboarding-select-card {
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.onboarding-select-card:hover {
+  background: var(--bg-hover);
+  border-color: rgba(56, 189, 248, 0.4);
+  transform: translateY(-1px);
+}
+
+.onboarding-select-card.card-selected {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 1px var(--accent-cyan);
+}
+
+.card-top-icon {
+  font-size: 22px;
+}
+
+.card-text-block strong {
+  display: block;
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.card-text-block p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.35;
+}
+
+/* Step 2 & 3: Active Items Boxes */
+.onboarding-active-items-box {
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  margin-bottom: 14px;
+}
+
+.items-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.onboarding-course-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.onboarding-course-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  font-size: 12px;
+}
+
+.chip-code {
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.chip-name {
+  color: var(--text-secondary);
+}
+
+.chip-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 12px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chip-remove:hover {
+  color: #f87171;
+}
+
+.onboarding-course-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 680px) {
+  .onboarding-course-actions-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.onboarding-action-card {
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+}
+
+.onboarding-action-card h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Timetable list in Step 3 */
+.onboarding-tt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.onboarding-tt-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+}
+
+.tt-badge {
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.tt-day-time {
+  color: var(--text-primary);
+}
+
+.tt-type {
+  text-transform: capitalize;
+  color: var(--text-muted);
+}
+
+.onboarding-tt-form {
+  padding: 16px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+}
+
+/* Step 5: Summary Card */
+.onboarding-summary-card {
+  padding: 20px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+
+.summary-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.summary-lbl {
+  color: var(--text-secondary);
+}
+
+.summary-val {
+  color: #fff;
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Footer Navigation Actions */
+.onboarding-footer-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-default);
+  margin-top: 10px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.actions-left,
+.actions-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ==========================================================================
+   Product Tour Tooltip & Spotlight Overlay
+   ========================================================================== */
+.product-tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  pointer-events: auto;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(2px);
+  animation: fadeIn 0.2s ease;
+}
+
+.tour-spotlight-box {
+  position: fixed;
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.75), 0 0 25px rgba(56, 189, 248, 0.6);
+  border: 2px solid var(--accent-cyan);
+  pointer-events: none;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 100000;
+}
+
+.tour-card {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  max-width: 440px;
+  width: calc(100% - 56px);
+  background: var(--bg-surface);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  padding: 20px;
+  z-index: 100001;
+  animation: slideUp 0.25s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tour-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.tour-step-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.tour-step-counter {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.tour-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+}
+
+.tour-close-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tour-step-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.tour-step-desc {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.tour-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* ==========================================================================
+   Help / How It Works Modal Styles
+   ========================================================================== */
+.help-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.help-intro {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.help-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.help-feature-card {
+  padding: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.help-feature-card .feature-icon {
+  font-size: 24px;
+  margin-bottom: 2px;
+}
+
+.help-feature-card h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.help-feature-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.help-modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 10px;
+  border-top: 1px solid var(--border-default);
+  padding-top: 16px;
+}

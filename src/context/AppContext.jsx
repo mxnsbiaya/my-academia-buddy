@@ -101,10 +101,17 @@ export function AppProvider({ children }) {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(() => {
     const profile = safeGetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile(), userId);
+    const existingCourses = safeGetScopedItem(STORAGE_KEYS.COURSES, [], userId);
+    const existingAssignments = safeGetScopedItem(STORAGE_KEYS.ASSIGNMENTS, [], userId);
+    if (existingCourses.length > 0 || existingAssignments.length > 0 || profile?.onboardingCompleted === true) {
+      return false;
+    }
     return profile?.onboardingCompleted === false;
   });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isMigrationModalOpen, setIsMigrationModalOpen] = useState(false);
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [isProductTourOpen, setIsProductTourOpen] = useState(false);
 
   const openCheckInModal = useCallback(() => setIsCheckInModalOpen(true), []);
   const closeCheckInModal = useCallback(() => setIsCheckInModalOpen(false), []);
@@ -116,6 +123,10 @@ export function AppProvider({ children }) {
   const closeAuthModal = useCallback(() => setIsAuthModalOpen(false), []);
   const openMigrationModal = useCallback(() => setIsMigrationModalOpen(true), []);
   const closeMigrationModal = useCallback(() => setIsMigrationModalOpen(false), []);
+  const openHelpModal = useCallback(() => setIsHelpModalOpen(true), []);
+  const closeHelpModal = useCallback(() => setIsHelpModalOpen(false), []);
+  const startProductTour = useCallback(() => setIsProductTourOpen(true), []);
+  const closeProductTour = useCallback(() => setIsProductTourOpen(false), []);
 
   // Non-blocking in-app notification toasts
   const [toasts, setToasts] = useState([]);
@@ -155,6 +166,13 @@ export function AppProvider({ children }) {
       setAdaptiveSignals(safeGetScopedItem(STORAGE_KEYS.ADAPTIVE_SIGNALS, getDefaultAdaptiveSignals(), userId));
       setTimetable(safeGetScopedItem(STORAGE_KEYS.TIMETABLE, [], userId));
 
+      const userProfile = safeGetScopedItem(STORAGE_KEYS.STUDENT_PROFILE, getDefaultStudentProfile(), userId);
+      const userCourses = safeGetScopedItem(STORAGE_KEYS.COURSES, [], userId);
+      const userAssignments = safeGetScopedItem(STORAGE_KEYS.ASSIGNMENTS, [], userId);
+      if (userCourses.length > 0 || userAssignments.length > 0 || userProfile?.onboardingCompleted === true) {
+        setIsOnboardingModalOpen(false);
+      }
+
       if (userId) {
         // Detect if migration is needed
         if (shouldPromptMigration(userId)) {
@@ -164,6 +182,9 @@ export function AppProvider({ children }) {
         // Pull cloud data
         pullCloudData(userId).then((cloudData) => {
           if (cloudData) {
+            if (cloudData.courses?.length > 0 || cloudData.assignments?.length > 0 || cloudData.studentProfile?.onboardingCompleted) {
+              setIsOnboardingModalOpen(false);
+            }
             if (cloudData.courses?.length > 0) setCourses(cloudData.courses);
             if (cloudData.syllabusTopics?.length > 0) setSyllabusTopics(cloudData.syllabusTopics);
             if (cloudData.assignments?.length > 0) setAssignments(cloudData.assignments);
@@ -682,14 +703,20 @@ export function AppProvider({ children }) {
   );
 
   const toggleAssignmentCompleted = useCallback(
-    (id) => {
+    (id, options = {}) => {
       setAssignments((prev) =>
         prev.map((a) => {
           if (a.id === id) {
-            const nextState = !a.completed;
+            const nextState = options.reopen !== undefined ? !options.reopen : !a.completed;
+            const completionType = nextState
+              ? (options.completionType || a.completionType || 'work_completed')
+              : null;
+            const completedAt = nextState ? (a.completedAt || new Date().toISOString()) : null;
             const updated = ensureEntityMetadata({
               ...a,
               completed: nextState,
+              completedAt,
+              completionType,
               version: (a.version || 1) + 1,
             });
             enqueueMutation(userId, {
@@ -698,7 +725,8 @@ export function AppProvider({ children }) {
               clientId: id,
               data: updated,
             });
-            addToast(nextState ? `Marked "${a.title}" as completed!` : `Reopened "${a.title}".`, 'info');
+            const typeLabel = completionType === 'submitted' ? 'Submitted' : 'Work completed';
+            addToast(nextState ? `Marked "${a.title}" as completed (${typeLabel})!` : `Reopened "${a.title}".`, 'info');
             return updated;
           }
           return a;
@@ -1216,9 +1244,11 @@ export function AppProvider({ children }) {
             });
           }
 
-          // Add assignments
+          // Add assignments (Confirmed only)
           if (imported.assignments && imported.assignments.length > 0) {
-            imported.assignments.forEach((a, aIdx) => {
+            imported.assignments
+              .filter((a) => a.confirmed !== false && !a.rejected)
+              .forEach((a, aIdx) => {
               const asgObj = ensureEntityMetadata({
                 id: `asg-${Date.now()}-${idx}-${aIdx}`,
                 title: a.title?.trim() || a.originalName || `Assignment ${aIdx + 1}`,
@@ -1243,9 +1273,11 @@ export function AppProvider({ children }) {
             });
           }
 
-          // Add exams
+          // Add exams (Confirmed only)
           if (imported.exams && imported.exams.length > 0) {
-            imported.exams.forEach((e, eIdx) => {
+            imported.exams
+              .filter((e) => e.confirmed !== false && !e.rejected)
+              .forEach((e, eIdx) => {
               const examObj = ensureEntityMetadata({
                 id: `exam-${Date.now()}-${idx}-${eIdx}`,
                 title: e.title?.trim() || e.originalName || 'Exam',
@@ -1465,6 +1497,12 @@ export function AppProvider({ children }) {
       openMigrationModal,
       closeMigrationModal,
       handleMigrationComplete,
+      isHelpModalOpen,
+      openHelpModal,
+      closeHelpModal,
+      isProductTourOpen,
+      startProductTour,
+      closeProductTour,
       // Bilingual i18n (Phase 4)
       language,
       changeLanguage,
@@ -1516,6 +1554,12 @@ export function AppProvider({ children }) {
       openMigrationModal,
       closeMigrationModal,
       handleMigrationComplete,
+      isHelpModalOpen,
+      openHelpModal,
+      closeHelpModal,
+      isProductTourOpen,
+      startProductTour,
+      closeProductTour,
       addToast,
       removeToast,
       updateStudentProfile,

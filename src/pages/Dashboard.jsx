@@ -20,6 +20,8 @@ export function Dashboard() {
     toggleEmergencyExamMode,
     toggleSessionCompleted,
     openCheckInModal,
+    openOnboardingModal,
+    openHelpModal,
     loadScenario,
   } = useApp();
 
@@ -220,9 +222,57 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* First-Time Welcome Banner if no courses added */}
+      {courses.length === 0 && (
+        <div
+          className="card"
+          style={{
+            padding: '20px 24px',
+            marginBottom: '24px',
+            background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(30, 41, 59, 0.9) 100%)',
+            border: '1px solid rgba(99, 102, 241, 0.35)',
+            borderRadius: '16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px',
+          }}
+          data-testid="welcome-onboarding-banner"
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+              <span style={{ fontSize: '20px' }}>👋</span>
+              <strong style={{ fontSize: '16px', color: '#fff' }}>Welcome to My Academia Buddy!</strong>
+            </div>
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '600px' }}>
+              Your semester has not been configured yet. Launch our clean 5-step guided wizard to import course syllabi or set your timetable and study hours.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={openOnboardingModal}
+              style={{ fontWeight: 700 }}
+            >
+              🚀 Launch Setup Guide
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={openHelpModal}
+            >
+              ❓ How It Works
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* PRIORITY 1: What Should I Do Now? (Hero Card) */}
       <section
         className="card"
+        data-tour="hero-recommendation"
         style={{
           padding: '24px',
           borderRadius: '16px',
@@ -416,6 +466,7 @@ export function Dashboard() {
         {/* Next Urgent Deadline Card */}
         <div
           className="card"
+          data-tour="upcoming-deadlines"
           style={{
             padding: '20px',
             borderRadius: '14px',
@@ -477,6 +528,7 @@ export function Dashboard() {
       {/* PRIORITY 4: Academic Health & Pacing */}
       <section
         className="card"
+        data-tour="focus-sessions"
         style={{
           padding: '20px 24px',
           borderRadius: '14px',
@@ -563,7 +615,7 @@ export function Dashboard() {
       </section>
 
       {/* PRIORITY 5: Quick Useful Actions Bar */}
-      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '24px' }}>
+      <div data-tour="quick-actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '24px' }}>
         <button
           type="button"
           className="btn btn-secondary"

@@ -602,6 +602,68 @@ export function extractAssessmentType(text = '') {
 }
 
 /**
+/**
+ * Detects whether a text line is a high-level course grading policy statement
+ * or general category allocation rather than an individual actionable assignment or exam.
+ * E.g. "Projects account for 42% and assignments account for 39% of the final grade."
+ *
+ * @param {string} line
+ * @param {object} [dateResult]
+ * @returns {boolean}
+ */
+export function isGradingPolicyStatement(line, dateResult = null) {
+  if (!line || typeof line !== 'string') return false;
+  const trimmed = line.trim();
+
+  // If a line specifies multiple percentages, it represents category allocations
+  // e.g. "Projects account for 42% and assignments account for 39% of the final grade."
+  const percentMatches = trimmed.match(/\b\d{1,2}(?:\.\d+)?\s*%/g) || [];
+  if (percentMatches.length >= 2) {
+    return true;
+  }
+
+  // Phrases expressing general grading calculations, policies or criteria
+  const policyPhrases = [
+    /\baccount(?:s)?\s+for\s+\d+/i,
+    /\bcomptent?\s+pour\s+\d+/i,
+    /\bworth\s+\d+\s*%/i,
+    /\bof\s+the\s+(?:final|course|total|overall)\s+grade\b/i,
+    /\bde\s+la\s+note\s+(?:finale|globale|du cours)\b/i,
+    /\bgrading\s+(?:scheme|policy|criteria|breakdown|weights?|scale)\b/i,
+    /\bbarème\s+(?:de\s+notation|d'évaluation)\b/i,
+    /\bpondération\s+(?:globale|du cours|des notes)\b/i,
+    /\brépartition\s+des\s+notes\b/i,
+    /\bwill\s+(?:comprise|make\s+up|contribute)\s+\d+/i,
+    /\breprésentent?\s+\d+\s*%/i,
+    /\bmark\s+distribution\b/i,
+    /\bevaluation\s+breakdown\b/i,
+    /\bassessment\s+breakdown\b/i,
+  ];
+
+  const hasPolicyPhrase = policyPhrases.some((pattern) => pattern.test(trimmed));
+
+  // Check if line mentions a specific individual numbered deliverable (e.g. "Assignment 1", "Devoir 2", "TP 3")
+  const hasSpecificInstance = /\b(?:Assignment|Devoir|PSet|Problem\s*Set|Project|Projet|TP|Travail\s*pratique|Quiz|Midterm|Test|Laboratoire|Lab\s*Report)\s*(?:n[°o.]?\s*)?(?:[1-9]\d?|Phase\s*[1-9]|Part\s*[1-9]|[A-D])\b/i.test(trimmed);
+
+  const hasSpecificDate = dateResult && Boolean(dateResult.date);
+
+  // If it has policy phrases and lacks an individual instance identifier, it's a general policy!
+  if (hasPolicyPhrase && !hasSpecificInstance) {
+    return true;
+  }
+
+  // If it's a plural/generic category header without a date or instance number (e.g. "Assignments: 25%", "Projects: 40%")
+  const isGenericCategoryLine =
+    /^(?:Assignments?|Devoirs?|Homework|Problem\s*Sets?|Projects?|Projets?|Travaux\s*pratiques|Laboratoires?|Labs?|Quizzes)(?:\s*\([^)]*\))?\s*[:–-]?\s*\d{1,2}\s*%(?:\s*(?:total|each))?$/i.test(trimmed);
+
+  if (isGenericCategoryLine && !hasSpecificDate && !hasSpecificInstance) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Extracts a meaningful original assessment title while removing trailing weight or date snippets
  * Preserves specific names like "Devoir 1: Structures arborescentes" or "Midterm 1: Logic"
  */
@@ -610,18 +672,20 @@ function cleanOriginalAssessmentTitle(rawLine = '', defaultLabel = 'Deliverable'
 
   // Split on weight or date clauses if present
   let title = rawLine
-    // Remove weight expressions: (Pondération: 15%), (Weight: 10%), 15%, [10%]
+    // Remove weight expressions: (Pondération: 15%), (Weight: 10%), 15%, [10%], — 10%
     .replace(/\s*\((?:weight|pondération|valeur)?[:\s]*\d{1,2}(?:\.\d+)?\s*%\)/gi, '')
-    .replace(/\s*[-–]\s*(?:weight|pondération)?[:\s]*\d{1,2}(?:\.\d+)?\s*%/gi, '')
+    .replace(/\s*[-–—]\s*(?:weight|pondération)?[:\s]*\d{1,2}(?:\.\d+)?\s*%/gi, '')
     // Remove due phrases: Due on October 18, À remettre le 15 octobre, etc.
     .replace(/\s*(?:due(?:\s+on)?|à remettre(?:\s+le)?|remise(?:\s+le)?|date)[:\s]+[^\n()]+/gi, '')
+    // Remove date snippets like "— October 15" or "— 15 octobre"
+    .replace(new RegExp(`\\s*[-–—]\\s*(?:[0-3]?\\d\\s+)?(?:${MONTH_NAMES_REGEX})(?:\\s+[0-3]?\\d)?(?:\\s*,?\\s*\\d{4})?`, 'gi'), '')
     // Remove trailing delimiters
-    .replace(/[:–-]\s*$/, '')
+    .replace(/[:–—-]\s*$/, '')
     .trim();
 
   // If title was stripped too aggressively, take text before colon or dash
   if (title.length < 3) {
-    title = rawLine.split(/[:–-]/)[0].trim() || defaultLabel;
+    title = rawLine.split(/[:–—-]/)[0].trim() || defaultLabel;
   }
 
   // Remove leading numbers or bullets like "1. ", "• "
@@ -673,6 +737,16 @@ export function extractAssignments(fullText = '', pages = [], courseName = '', f
       // Extract due date and time
       const dateResult = parseSyllabusDate(line, fallbackYear);
 
+      // Skip general grading policy or category allocation statements
+      // E.g. "Projects account for 42% and assignments account for 39% of the final grade."
+      if (isGradingPolicyStatement(line, dateResult)) return;
+
+      // Check whether line mentions an explicit individual instance (e.g. "Assignment 1", "TP 2", "Project Phase 1")
+      const hasSpecificInstance = /\b(?:Assignment|Devoir|PSet|Problem\s*Set|Project|Projet|TP|Travail\s*pratique|Quiz|Laboratoire|Lab\s*Report)\s*(?:n[°o.]?\s*)?(?:[1-9]\d?|Phase\s*[1-9]|Part\s*[1-9]|[A-D])\b/i.test(line);
+
+      // If an assignment has neither a specific date nor an explicit instance number, it's not an individual deliverable!
+      if (!dateResult.date && !hasSpecificInstance) return;
+
       // Skip generic summary category lines that lack a specific number or date e.g. "Assignments: 25%"
       const isCategorySummaryOnly =
         !dateResult.date &&
@@ -714,6 +788,10 @@ export function extractAssignments(fullText = '', pages = [], courseName = '', f
       );
 
       if (!isDuplicate && originalTitle.length < 80) {
+        const confidence = dateResult.date && !dateResult.needsReview ? 'high' : (dateResult.date || weight ? 'medium' : 'low');
+        const needsReview = Boolean(dateResult.needsReview || !dateResult.date);
+        const confirmed = Boolean(dateResult.date && !dateResult.needsReview);
+
         assignments.push({
           id: `asg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           title: originalTitle,
@@ -723,7 +801,7 @@ export function extractAssignments(fullText = '', pages = [], courseName = '', f
           dueDate: dateResult.date || '',
           dueTime: dateResult.time || '23:59',
           isYearEstimated: dateResult.isYearEstimated,
-          needsReview: dateResult.needsReview,
+          needsReview,
           reviewReason: dateResult.reviewReason,
           priority: weight && weight >= 15 ? 'High' : 'Medium',
           estimatedWorkload: weight && weight >= 15 ? 6 : 4,
@@ -732,7 +810,8 @@ export function extractAssignments(fullText = '', pages = [], courseName = '', f
           completed: false,
           pageNumber,
           sourceSnippet: line,
-          confidence: dateResult.date ? 'high' : 'medium',
+          confidence,
+          confirmed,
         });
       }
     }
@@ -779,6 +858,15 @@ export function extractExams(fullText = '', pages = [], courseName = '', fallbac
 
       const dateResult = parseSyllabusDate(line, fallbackYear);
 
+      // Skip general grading policy statements
+      if (isGradingPolicyStatement(line, dateResult)) return;
+
+      // Skip generic category summary lines (e.g. "Midterm Exam: 30%") if it has no date
+      const isExamCategorySummaryOnly =
+        !dateResult.date &&
+        /^(?:Midterm(?:\s*Exam)?|Final(?:\s*Exam)?|Examen\s*(?:intra|final|de\s*mi-session))\s*[:–-]?\s*\d{1,2}\s*%/i.test(line);
+      if (isExamCategorySummaryOnly) return;
+
       // Determine original exam title faithfully
       let title = cleanOriginalAssessmentTitle(line, 'Midterm Exam');
 
@@ -796,11 +884,6 @@ export function extractExams(fullText = '', pages = [], courseName = '', fallbac
       // Location match e.g. "Hall 150", "Montpetit 202", "Pavillon Simard"
       const locMatch = line.match(/(?:Location|Room|Salle|Pavillon)[:\s]+([^,;\n)]+)/i);
       const location = locMatch ? locMatch[1].trim() : '';
-
-      // Skip generic category summary lines (e.g. "Midterm Exam: 30%") if it has no date
-      const isExamCategorySummaryOnly =
-        !dateResult.date &&
-        /^(?:Midterm(?:\s*Exam)?|Final(?:\s*Exam)?|Examen\s*(?:intra|final|de\s*mi-session))\s*[:–-]?\s*\d{1,2}\s*%/i.test(line);
 
       // Check if this exam was already recorded
       const existing = exams.find((e) => {
@@ -828,8 +911,13 @@ export function extractExams(fullText = '', pages = [], courseName = '', fallbac
           if (weight) existing.weightPercent = weight;
           existing.sourceSnippet = line;
           existing.confidence = 'high';
+          existing.confirmed = !dateResult.needsReview;
         }
-      } else if (!isExamCategorySummaryOnly) {
+      } else {
+        const confidence = dateResult.date && !dateResult.needsReview ? 'high' : (dateResult.date || weight ? 'medium' : 'low');
+        const needsReview = Boolean(dateResult.needsReview || !dateResult.date);
+        const confirmed = Boolean(dateResult.date && !dateResult.needsReview);
+
         exams.push({
           id: `exam-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           title,
@@ -839,7 +927,7 @@ export function extractExams(fullText = '', pages = [], courseName = '', fallbac
           date: dateResult.date || '',
           time: dateResult.time || '',
           isYearEstimated: dateResult.isYearEstimated,
-          needsReview: dateResult.needsReview,
+          needsReview,
           reviewReason: dateResult.reviewReason,
           location,
           notes: weight ? `Grading weight: ${weight}% of final grade` : '',
@@ -848,7 +936,8 @@ export function extractExams(fullText = '', pages = [], courseName = '', fallbac
           weightPercent: weight,
           pageNumber,
           sourceSnippet: line,
-          confidence: dateResult.date ? 'high' : 'medium',
+          confidence,
+          confirmed,
         });
       }
     }
@@ -859,6 +948,8 @@ export function extractExams(fullText = '', pages = [], courseName = '', fallbac
 
 /**
  * Extracts grading breakdown schemes (% weights totaling 100%)
+ * Also extracts multi-clause grading statements like:
+ * "Projects account for 42% and assignments account for 39% of the final grade."
  * 
  * @param {string} fullText
  * @returns {Array<{ component: string, weightPercent: number, sourceSnippet: string }>}
@@ -870,7 +961,11 @@ export function extractGradingScheme(fullText = '') {
   // Look for percentage lines e.g. "Assignments: 25%" or "Examen final ... 40%"
   const gradeItemRegex = /^([A-Za-zÀ-ÿ\s/&–-]+)[:\s.]+([0-9]{1,2}(?:\.[0-9]+)?)\s*%/;
 
+  // Also match narrative policy sentences like "Projects account for 42% and assignments account for 39% of the final grade"
+  const sentenceRegex = /\b([A-Za-zÀ-ÿ\s–-]+?)\s+(?:account(?:s)?\s+for|comptent?\s+pour|worth|représentent?)\s+([0-9]{1,2}(?:\.[0-9]+)?)\s*%/gi;
+
   lines.forEach((line) => {
+    // 1. Direct item match
     const match = line.match(gradeItemRegex);
     if (match) {
       const comp = match[1].trim();
@@ -882,11 +977,30 @@ export function extractGradingScheme(fullText = '') {
         pct <= 100 &&
         !comp.toLowerCase().includes('minimum')
       ) {
-        breakdown.push({
-          component: comp,
-          weightPercent: pct,
-          sourceSnippet: line,
-        });
+        if (!breakdown.some((b) => b.component.toLowerCase() === comp.toLowerCase())) {
+          breakdown.push({
+            component: comp,
+            weightPercent: pct,
+            sourceSnippet: line,
+          });
+        }
+      }
+    }
+
+    // 2. Narrative sentence match
+    let sMatch;
+    sentenceRegex.lastIndex = 0;
+    while ((sMatch = sentenceRegex.exec(line)) !== null) {
+      const comp = sMatch[1].replace(/^(?:and|et|,|\.)\s*/i, '').trim();
+      const pct = parseFloat(sMatch[2]);
+      if (comp.length > 2 && comp.length < 40 && pct > 0 && pct <= 100) {
+        if (!breakdown.some((b) => b.component.toLowerCase() === comp.toLowerCase())) {
+          breakdown.push({
+            component: comp,
+            weightPercent: pct,
+            sourceSnippet: line,
+          });
+        }
       }
     }
   });
@@ -1001,6 +1115,11 @@ export function parseSyllabusDocument({
   };
 }
 
+/**
+ * Functional shorthand for parseSyllabusDocument
+ */
+export const parseSyllabus = (text, options = {}) => parseSyllabusDocument({ text, ...options });
+
 export default {
   detectLanguage,
   extractAcademicContext,
@@ -1014,5 +1133,7 @@ export default {
   extractAssignments,
   extractExams,
   extractGradingScheme,
+  isGradingPolicyStatement,
   parseSyllabusDocument,
+  parseSyllabus,
 };

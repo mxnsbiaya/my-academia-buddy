@@ -23,6 +23,8 @@ export function CheckInModal({ isOpen, onClose }) {
     exams = [],
     studyPlan = [],
     submitCheckIn,
+    addAssignment,
+    addExam,
     userId,
     addToast,
   } = useApp();
@@ -55,6 +57,53 @@ export function CheckInModal({ isOpen, onClose }) {
 
   // Step 4: Deliverables state { [asgId]: 'not_started' | 'in_progress' | 'almost_done' | 'completed' }
   const [deliverableStatus, setDeliverableStatus] = useState({});
+
+  // Step 4: Periodic New Assignment Check (Phase 4.1)
+  const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false);
+  const [newDeliverableKind, setNewDeliverableKind] = useState('assignment');
+  const [newDeliverableTitle, setNewDeliverableTitle] = useState('');
+  const [newDeliverableCourse, setNewDeliverableCourse] = useState('');
+  const [newDeliverableDate, setNewDeliverableDate] = useState('');
+  const [newDeliverableWeight, setNewDeliverableWeight] = useState('');
+  const [newDeliverablesAdded, setNewDeliverablesAdded] = useState([]);
+
+  const handleAddNewAnnouncement = () => {
+    if (!newDeliverableTitle.trim()) {
+      addToast('Please enter a deliverable title.', 'warning');
+      return;
+    }
+    if (!newDeliverableDate) {
+      addToast('Please select a due date.', 'warning');
+      return;
+    }
+
+    const assignedCourse = newDeliverableCourse || (courses[0]?.name || 'General');
+
+    if (newDeliverableKind === 'exam') {
+      const created = addExam({
+        title: newDeliverableTitle.trim(),
+        course: assignedCourse,
+        date: newDeliverableDate,
+        weightPercent: Number(newDeliverableWeight) || 15,
+        priority: 'High',
+      });
+      setNewDeliverablesAdded((prev) => [...prev, { ...created, type: 'Exam' }]);
+    } else {
+      const created = addAssignment({
+        title: newDeliverableTitle.trim(),
+        course: assignedCourse,
+        dueDate: newDeliverableDate,
+        weightPercent: Number(newDeliverableWeight) || 10,
+        priority: 'Medium',
+      });
+      setNewDeliverablesAdded((prev) => [...prev, { ...created, type: 'Assignment' }]);
+    }
+
+    setNewDeliverableTitle('');
+    setNewDeliverableDate('');
+    setNewDeliverableWeight('');
+    addToast('New deliverable added to your schedule!', 'success');
+  };
 
   // Step 5: Pacing state { [courseId]: 'on_track' | 'slightly_behind' | 'severely_behind' }
   const [pacingStatus, setPacingStatus] = useState({});
@@ -882,6 +931,147 @@ export function CheckInModal({ isOpen, onClose }) {
                 );
               })
             )}
+
+            {/* Periodic New Deliverable Check (Phase 4.1) */}
+            <div
+              style={{
+                marginTop: '10px',
+                padding: '14px',
+                backgroundColor: 'rgba(56, 189, 248, 0.05)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                borderRadius: '10px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '16px' }}>📢</span>
+                  <div>
+                    <strong style={{ fontSize: '13px' }}>
+                      Did professors announce any new assignments or exams this week?
+                    </strong>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      Optional: keep your schedule up-to-date as professors release deliverables throughout the term.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${hasNewAnnouncements ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setHasNewAnnouncements(true)}
+                    style={{ fontSize: '11px', padding: '4px 10px' }}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${!hasNewAnnouncements ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setHasNewAnnouncements(false)}
+                    style={{ fontSize: '11px', padding: '4px 10px' }}
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+
+              {hasNewAnnouncements && (
+                <div
+                  style={{
+                    padding: '12px',
+                    backgroundColor: 'var(--bg-surface)',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1.5fr 1.5fr 1fr', gap: '8px', alignItems: 'center' }}>
+                    <div>
+                      <select
+                        className="form-input"
+                        value={newDeliverableKind}
+                        onChange={(e) => setNewDeliverableKind(e.target.value)}
+                        style={{ width: '100%', fontSize: '12px' }}
+                      >
+                        <option value="assignment">Assignment</option>
+                        <option value="exam">Exam</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Deliverable Title..."
+                        value={newDeliverableTitle}
+                        onChange={(e) => setNewDeliverableTitle(e.target.value)}
+                        style={{ width: '100%', fontSize: '12px' }}
+                      />
+                    </div>
+
+                    <div>
+                      <select
+                        className="form-input"
+                        value={newDeliverableCourse}
+                        onChange={(e) => setNewDeliverableCourse(e.target.value)}
+                        style={{ width: '100%', fontSize: '12px' }}
+                      >
+                        <option value="">Course (Optional)</option>
+                        {courses.map((c) => (
+                          <option key={c.id} value={c.name}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <input
+                        type="date"
+                        className="form-input"
+                        value={newDeliverableDate}
+                        onChange={(e) => setNewDeliverableDate(e.target.value)}
+                        style={{ width: '100%', fontSize: '12px' }}
+                      />
+                    </div>
+
+                    <div>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={handleAddNewAnnouncement}
+                        style={{ width: '100%', fontSize: '12px' }}
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {newDeliverablesAdded.length > 0 && (
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {newDeliverablesAdded.map((item, idx) => (
+                        <span
+                          key={idx}
+                          style={{
+                            fontSize: '11px',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                            color: 'var(--success)',
+                            fontWeight: 600,
+                          }}
+                        >
+                          ✓ Added: {item.title} ({item.course || 'Course'})
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

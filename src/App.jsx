@@ -13,6 +13,8 @@ import { ProfileModal } from './components/ProfileModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { AuthModal } from './components/AuthModal';
 import { MigrationModal } from './components/MigrationModal';
+import { HelpModal } from './components/HelpModal';
+import { ProductTour } from './components/ProductTour';
 
 import Dashboard from './pages/Dashboard';
 import Courses from './pages/Courses';
@@ -40,6 +42,8 @@ function AppContent() {
     isMigrationModalOpen,
     closeMigrationModal,
     handleMigrationComplete,
+    isHelpModalOpen,
+    closeHelpModal,
   } = useApp();
 
   return (
@@ -97,6 +101,11 @@ function AppContent() {
           userId={user?.id}
           onMigrationComplete={handleMigrationComplete}
         />
+        <HelpModal
+          isOpen={isHelpModalOpen}
+          onClose={closeHelpModal}
+        />
+        <ProductTour />
       </div>
     </BrowserRouter>
   );

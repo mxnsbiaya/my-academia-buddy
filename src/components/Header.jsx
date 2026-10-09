@@ -12,6 +12,7 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
     openCheckInModal,
     openProfileModal,
     openAuthModal,
+    openHelpModal,
     adaptiveSignals,
     syncStatus,
     syncConflict,
@@ -139,6 +140,7 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
           className={`header-btn checkin-trigger-btn ${!hasRecentCheckIn ? 'checkin-pulse' : ''}`}
           onClick={openCheckInModal}
           title="Take 2-minute weekly check-in"
+          data-tour="checkin-trigger"
         >
           <span aria-hidden="true">🧭</span>
           <span className="header-btn-label">{t('nav_checkin')}</span>
@@ -151,6 +153,7 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
           className="header-btn"
           onClick={openProfileModal}
           title="View Student Profile & Availability Preferences"
+          data-tour="profile-trigger"
         >
           <span aria-hidden="true">👤</span>
           <span className="header-btn-label">
@@ -169,6 +172,18 @@ export function Header({ onToggleSidebar, onOpenDataModal }) {
           <span className="header-btn-label">
             {user ? (user.user_metadata?.full_name ? user.user_metadata.full_name.split(' ')[0] : user.email?.split('@')[0]) : t('nav_sign_in')}
           </span>
+        </button>
+
+        {/* Help & Tutorial Tour */}
+        <button
+          type="button"
+          className="header-btn"
+          onClick={openHelpModal}
+          title={t('nav_help_tour')}
+          aria-label={t('nav_help_tour')}
+        >
+          <span aria-hidden="true">❓</span>
+          <span className="header-btn-label">{t('nav_help_tour')}</span>
         </button>
 
         {/* Data Backup */}

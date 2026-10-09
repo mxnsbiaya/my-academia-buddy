@@ -66,11 +66,33 @@ describe('Component Integration Tests', () => {
 
       expect(screen.getByText('Sprint 2 Milestone')).toBeInTheDocument();
 
-      // Toggle completed
+      // Click complete button opens confirmation dialog
       const checkBtn = screen.getByRole('button', { name: /Mark "Sprint 2 Milestone" as completed/i });
       fireEvent.click(checkBtn);
 
-      expect(screen.getByRole('button', { name: /Mark "Sprint 2 Milestone" as incomplete/i })).toBeInTheDocument();
+      // Confirm dialog is shown
+      expect(screen.getByText(/Confirm your progress on/i)).toBeInTheDocument();
+      const confirmBtn = screen.getByRole('button', { name: /Confirm & Complete Task/i });
+      fireEvent.click(confirmBtn);
+
+      // Task is removed from active deliverables
+      expect(screen.getByText(/You are all caught up! No active pending assignments./i)).toBeInTheDocument();
+
+      // View Completed / History tab
+      const completedTab = screen.getByRole('button', { name: /Completed \/ History/i });
+      fireEvent.click(completedTab);
+
+      // Task is in history with Work Completed badge and Reopen Task button
+      expect(screen.getByText('Sprint 2 Milestone')).toBeInTheDocument();
+      expect(screen.getByText(/Work Completed/i)).toBeInTheDocument();
+
+      const reopenBtn = screen.getByRole('button', { name: /Reopen Task/i });
+      fireEvent.click(reopenBtn);
+
+      // After reopening, it is back in active view
+      const activeTab = screen.getByRole('button', { name: /Active Deliverables/i });
+      fireEvent.click(activeTab);
+      expect(screen.getByText('Sprint 2 Milestone')).toBeInTheDocument();
     });
   });
 

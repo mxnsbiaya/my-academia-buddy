@@ -386,27 +386,6 @@ export function SyllabusImport() {
   };
 
   /**
-   * Add empty assignment to active course
-   */
-  const addAssignment = () => {
-    setImportedCourses((prev) =>
-      prev.map((c, idx) => {
-        if (idx !== selectedCourseIndex) return c;
-        const newAsg = {
-          id: `asg-${Date.now()}`,
-          title: 'New Assignment',
-          dueDate: '',
-          priority: 'Medium',
-          weightPercent: 10,
-          estimatedWorkload: 4,
-          confidence: 'high',
-        };
-        return { ...c, assignments: [...c.assignments, newAsg] };
-      })
-    );
-  };
-
-  /**
    * Delete assignment on active course
    */
   const deleteAssignment = (asgIndex) => {
@@ -436,27 +415,6 @@ export function SyllabusImport() {
   };
 
   /**
-   * Add exam to active course
-   */
-  const addExam = () => {
-    setImportedCourses((prev) =>
-      prev.map((c, idx) => {
-        if (idx !== selectedCourseIndex) return c;
-        const newExam = {
-          id: `exam-${Date.now()}`,
-          title: 'Midterm Exam',
-          date: '',
-          location: '',
-          weightPercent: 25,
-          estimatedWorkload: 8,
-          confidence: 'high',
-        };
-        return { ...c, exams: [...c.exams, newExam] };
-      })
-    );
-  };
-
-  /**
    * Delete exam on active course
    */
   const deleteExam = (examIndex) => {
@@ -469,6 +427,104 @@ export function SyllabusImport() {
         };
       })
     );
+  };
+
+  /**
+   * Deliverable Review & Confirmation Handlers (Phase 4.1)
+   */
+  const confirmAssignment = (asgIndex) => {
+    updateAssignment(asgIndex, 'confirmed', true);
+    updateAssignment(asgIndex, 'needsReview', false);
+    updateAssignment(asgIndex, 'confidence', 'high');
+    addToast('Deliverable confirmed for import!', 'success');
+  };
+
+  const rejectAssignment = (asgIndex) => {
+    deleteAssignment(asgIndex);
+    addToast('False positive deliverable rejected and discarded.', 'info');
+  };
+
+  const confirmExam = (examIndex) => {
+    updateExam(examIndex, 'confirmed', true);
+    updateExam(examIndex, 'needsReview', false);
+    updateExam(examIndex, 'confidence', 'high');
+    addToast('Exam confirmed for import!', 'success');
+  };
+
+  const rejectExam = (examIndex) => {
+    deleteExam(examIndex);
+    addToast('False positive exam rejected and discarded.', 'info');
+  };
+
+  // Add Missing Deliverable Modal State
+  const [showAddDeliverableModal, setShowAddDeliverableModal] = useState(false);
+  const [newDelivKind, setNewDelivKind] = useState('assignment'); // 'assignment' | 'exam'
+  const [newDelivTitle, setNewDelivTitle] = useState('');
+  const [newDelivDate, setNewDelivDate] = useState('');
+  const [newDelivTime, setNewDelivTime] = useState('23:59');
+  const [newDelivWeight, setNewDelivWeight] = useState('10');
+  const [newDelivPriority, setNewDelivPriority] = useState('Medium');
+  const [newDelivLocation, setNewDelivLocation] = useState('');
+
+  const handleCreateCustomDeliverable = () => {
+    if (!newDelivTitle.trim()) {
+      addToast('Please enter a deliverable title.', 'warning');
+      return;
+    }
+
+    if (newDelivKind === 'exam') {
+      const examItem = {
+        id: `exam-${Date.now()}`,
+        title: newDelivTitle.trim(),
+        originalName: newDelivTitle.trim(),
+        type: 'exam',
+        date: newDelivDate || '',
+        time: newDelivTime || '',
+        location: newDelivLocation.trim(),
+        weightPercent: Number(newDelivWeight) || 15,
+        priority: newDelivPriority || 'High',
+        estimatedWorkload: 8,
+        confidence: 'high',
+        confirmed: true,
+        needsReview: false,
+      };
+      setImportedCourses((prev) =>
+        prev.map((c, idx) =>
+          idx === selectedCourseIndex ? { ...c, exams: [...(c.exams || []), examItem] } : c
+        )
+      );
+      addToast(`Exam "${newDelivTitle}" added and confirmed.`, 'success');
+    } else {
+      const asgItem = {
+        id: `asg-${Date.now()}`,
+        title: newDelivTitle.trim(),
+        originalName: newDelivTitle.trim(),
+        type: newDelivKind || 'assignment',
+        dueDate: newDelivDate || '',
+        dueTime: newDelivTime || '23:59',
+        weightPercent: Number(newDelivWeight) || 10,
+        priority: newDelivPriority || 'Medium',
+        estimatedWorkload: 4,
+        confidence: 'high',
+        confirmed: true,
+        needsReview: false,
+      };
+      setImportedCourses((prev) =>
+        prev.map((c, idx) =>
+          idx === selectedCourseIndex ? { ...c, assignments: [...(c.assignments || []), asgItem] } : c
+        )
+      );
+      addToast(`Deliverable "${newDelivTitle}" added and confirmed.`, 'success');
+    }
+
+    // Reset form & close modal
+    setNewDelivTitle('');
+    setNewDelivDate('');
+    setNewDelivTime('23:59');
+    setNewDelivWeight('10');
+    setNewDelivPriority('Medium');
+    setNewDelivLocation('');
+    setShowAddDeliverableModal(false);
   };
 
   /**
@@ -535,6 +591,7 @@ export function SyllabusImport() {
 
   /**
    * Final Step: Confirm and Save into AppContext
+   * Saves ONLY verified and confirmed deliverables into active semester!
    */
   const handleFinalizeImport = () => {
     if (importedCourses.length === 0) {
@@ -542,12 +599,29 @@ export function SyllabusImport() {
       return;
     }
 
+    // Filter each course so that only confirmed, non-rejected items are imported!
+    const verifiedCourses = importedCourses.map((c) => ({
+      ...c,
+      assignments: (c.assignments || []).filter((a) => a.confirmed !== false && !a.rejected),
+      exams: (c.exams || []).filter((e) => e.confirmed !== false && !e.rejected),
+    }));
+
+    const confirmedDeliverablesCount = verifiedCourses.reduce(
+      (sum, c) => sum + (c.assignments?.length || 0) + (c.exams?.length || 0),
+      0
+    );
+
     const result = importSemesterFromSyllabi({
-      courses: importedCourses,
+      courses: verifiedCourses,
       replaceExisting,
     });
 
     if (result.success) {
+      addToast(
+        `🎉 Successfully setup academic semester with ${verifiedCourses.length} course(s) and ${confirmedDeliverablesCount} verified deliverable(s)!`,
+        'success',
+        6000
+      );
       navigate('/courses');
     }
   };
@@ -556,11 +630,23 @@ export function SyllabusImport() {
 
   // Aggregate statistics for confirmation card
   const totalTopicsCount = importedCourses.reduce((sum, c) => sum + (c.topics?.length || 0), 0);
-  const totalAssignmentsCount = importedCourses.reduce(
-    (sum, c) => sum + (c.assignments?.length || 0),
+  const totalConfirmedAssignments = importedCourses.reduce(
+    (sum, c) => sum + (c.assignments || []).filter((a) => a.confirmed !== false && !a.rejected).length,
     0
   );
-  const totalExamsCount = importedCourses.reduce((sum, c) => sum + (c.exams?.length || 0), 0);
+  const totalConfirmedExams = importedCourses.reduce(
+    (sum, c) => sum + (c.exams || []).filter((e) => e.confirmed !== false && !e.rejected).length,
+    0
+  );
+  const totalConfirmedDeliverables = totalConfirmedAssignments + totalConfirmedExams;
+
+  const totalNeedsReviewCount = importedCourses.reduce(
+    (sum, c) =>
+      sum +
+      (c.assignments || []).filter((a) => (a.needsReview || a.confirmed === false) && !a.rejected).length +
+      (c.exams || []).filter((e) => (e.needsReview || e.confirmed === false) && !e.rejected).length,
+    0
+  );
 
   return (
     <div className="syllabus-import-page" style={{ paddingBottom: '80px' }}>
@@ -1428,396 +1514,661 @@ export function SyllabusImport() {
                 </div>
               </div>
 
-              {/* Two Column: Assignments & Exams */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
-                  gap: '20px',
-                }}
-              >
-                {/* Assignments Card */}
-                <div
-                  className="card"
-                  style={{
-                    backgroundColor: 'var(--bg-surface)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: '14px',
-                    padding: '20px',
-                  }}
-                >
+              {/* MANDATORY ASSESSMENT REVIEW & DELIVERABLES (Phase 4.1) */}
+              {(() => {
+                const asgNeedsReview = (activeCourse.assignments || [])
+                  .map((a, idx) => ({ ...a, originalIndex: idx, kind: 'assignment' }))
+                  .filter((a) => (a.needsReview || a.confirmed === false) && !a.rejected);
+
+                const asgConfirmed = (activeCourse.assignments || [])
+                  .map((a, idx) => ({ ...a, originalIndex: idx, kind: 'assignment' }))
+                  .filter((a) => a.confirmed !== false && !a.needsReview && !a.rejected);
+
+                const examNeedsReview = (activeCourse.exams || [])
+                  .map((e, idx) => ({ ...e, originalIndex: idx, kind: 'exam' }))
+                  .filter((e) => (e.needsReview || e.confirmed === false) && !e.rejected);
+
+                const examConfirmed = (activeCourse.exams || [])
+                  .map((e, idx) => ({ ...e, originalIndex: idx, kind: 'exam' }))
+                  .filter((e) => e.confirmed !== false && !e.needsReview && !e.rejected);
+
+                const totalCourseNeedsReview = asgNeedsReview.length + examNeedsReview.length;
+                const totalCourseConfirmed = asgConfirmed.length + examConfirmed.length;
+
+                return (
                   <div
+                    className="card"
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '16px',
+                      backgroundColor: 'var(--bg-surface)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '14px',
+                      padding: '24px',
                     }}
                   >
-                    <h3
+                    {/* Review Section Header */}
+                    <div
                       style={{
-                        fontSize: '15px',
-                        fontWeight: 600,
                         display: 'flex',
+                        justifyContent: 'space-between',
                         alignItems: 'center',
-                        gap: '8px',
+                        marginBottom: '18px',
+                        flexWrap: 'wrap',
+                        gap: '12px',
                       }}
                     >
-                      <span>📝</span> Assignments & Deliverables ({activeCourse.assignments?.length || 0})
-                    </h3>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={addAssignment}
-                      style={{ fontSize: '12px' }}
-                    >
-                      + Add Assignment
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {(activeCourse.assignments || []).map((asg, aIdx) => (
-                      <div
-                        key={asg.id || aIdx}
-                        style={{
-                          padding: '12px',
-                          backgroundColor: 'var(--bg-card)',
-                          borderRadius: '10px',
-                          border: '1px solid var(--border-subtle)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '8px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                          <input
-                            type="text"
-                            className="form-input"
-                            value={asg.title}
-                            onChange={(e) => updateAssignment(aIdx, 'title', e.target.value)}
-                            placeholder="Assignment Title"
-                            style={{ flex: 1, fontSize: '13px', fontWeight: 600 }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => deleteAssignment(aIdx)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--text-muted)',
-                              cursor: 'pointer',
-                              fontSize: '14px',
-                            }}
-                          >
-                            ✕
-                          </button>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '20px' }}>📋</span>
+                          <h3 style={{ fontSize: '18px', fontWeight: 700 }}>
+                            Mandatory Assessment & Deliverables Review
+                          </h3>
                         </div>
+                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                          Verify every detected assignment, project, and exam. Only confirmed deliverables will be
+                          imported into your calendar and study plan.
+                        </p>
+                      </div>
 
-                        <div
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span
                           style={{
-                            display: 'grid',
-                            gridTemplateColumns: '1.2fr 1fr 1fr 1fr',
-                            gap: '8px',
-                            alignItems: 'center',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            padding: '4px 10px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                            color: 'var(--success)',
                           }}
                         >
-                          <div>
-                            <label
-                              style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted)',
-                                display: 'block',
-                              }}
-                            >
-                              Due Date
-                            </label>
-                            <input
-                              type="date"
-                              className="form-input"
-                              value={asg.dueDate || ''}
-                              onChange={(e) => updateAssignment(aIdx, 'dueDate', e.target.value)}
-                              style={{ width: '100%', fontSize: '12px' }}
-                            />
-                          </div>
+                          ✓ {totalCourseConfirmed} Confirmed
+                        </span>
 
-                          <div>
-                            <label
-                              style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted)',
-                                display: 'block',
-                              }}
-                            >
-                              Due Time
-                            </label>
-                            <input
-                              type="text"
-                              className="form-input"
-                              value={asg.dueTime || '23:59'}
-                              onChange={(e) => updateAssignment(aIdx, 'dueTime', e.target.value)}
-                              placeholder="23:59"
-                              style={{ width: '100%', fontSize: '12px' }}
-                            />
-                          </div>
-
-                          <div>
-                            <label
-                              style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted)',
-                                display: 'block',
-                              }}
-                            >
-                              Weight (%)
-                            </label>
-                            <input
-                              type="number"
-                              className="form-input"
-                              value={asg.weightPercent || ''}
-                              onChange={(e) =>
-                                updateAssignment(aIdx, 'weightPercent', Number(e.target.value))
-                              }
-                              placeholder="e.g. 15"
-                              style={{ width: '100%', fontSize: '12px' }}
-                            />
-                          </div>
-
-                          <div>
-                            <label
-                              style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted)',
-                                display: 'block',
-                              }}
-                            >
-                              Priority
-                            </label>
-                            <select
-                              className="form-input"
-                              value={asg.priority || 'Medium'}
-                              onChange={(e) => updateAssignment(aIdx, 'priority', e.target.value)}
-                              style={{ width: '100%', fontSize: '12px' }}
-                            >
-                              <option value="Low">Low</option>
-                              <option value="Medium">Medium</option>
-                              <option value="High">High</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        {asg.needsReview && (
-                          <div
+                        {totalCourseNeedsReview > 0 && (
+                          <span
                             style={{
-                              fontSize: '11px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              backgroundColor: 'rgba(245, 158, 11, 0.15)',
                               color: 'var(--warning)',
-                              backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                              border: '1px solid rgba(245, 158, 11, 0.3)',
-                              borderRadius: '6px',
-                              padding: '5px 8px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
                             }}
                           >
-                            <span>⚠️</span> <strong>Needs Student Review:</strong>{' '}
-                            {asg.reviewReason || 'Please verify due date and time.'}
-                          </div>
+                            ⚠️ {totalCourseNeedsReview} Needs Review
+                          </span>
                         )}
+
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setShowAddDeliverableModal(true)}
+                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <span>+</span> Add Missing Deliverable
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
 
-                {/* Exams Card */}
-                <div
-                  className="card"
-                  style={{
-                    backgroundColor: 'var(--bg-surface)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: '14px',
-                    padding: '20px',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '16px',
-                    }}
-                  >
-                    <h3
-                      style={{
-                        fontSize: '15px',
-                        fontWeight: 600,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                      }}
-                    >
-                      <span>📅</span> Midterms & Exams ({activeCourse.exams?.length || 0})
-                    </h3>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={addExam}
-                      style={{ fontSize: '12px' }}
-                    >
-                      + Add Exam
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {(activeCourse.exams || []).map((exam, eIdx) => (
+                    {/* SECTION 1: NEEDS REVIEW / UNCERTAIN DELIVERABLES */}
+                    {totalCourseNeedsReview > 0 && (
                       <div
-                        key={exam.id || eIdx}
                         style={{
-                          padding: '12px',
-                          backgroundColor: 'var(--bg-card)',
-                          borderRadius: '10px',
-                          border: '1px solid var(--border-subtle)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '8px',
+                          marginBottom: '28px',
+                          padding: '18px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                          border: '1px solid rgba(245, 158, 11, 0.35)',
                         }}
                       >
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                          <input
-                            type="text"
-                            className="form-input"
-                            value={exam.title}
-                            onChange={(e) => updateExam(eIdx, 'title', e.target.value)}
-                            placeholder="Exam Title"
-                            style={{ flex: 1, fontSize: '13px', fontWeight: 600 }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => deleteExam(eIdx)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--text-muted)',
-                              cursor: 'pointer',
-                              fontSize: '14px',
-                            }}
-                          >
-                            ✕
-                          </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                          <span style={{ fontSize: '18px' }}>⚠️</span>
+                          <div>
+                            <strong style={{ color: 'var(--warning)', fontSize: '14px' }}>
+                              Needs Student Review ({totalCourseNeedsReview})
+                            </strong>
+                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                              These items were found in the syllabus text but have uncertain dates or missing details.
+                              Confirm items to include them, or reject false positives. Unconfirmed items will NOT be added.
+                            </div>
+                          </div>
                         </div>
 
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {/* Uncertain Assignments */}
+                          {asgNeedsReview.map((asg) => (
+                            <div
+                              key={asg.id || asg.originalIndex}
+                              style={{
+                                padding: '14px',
+                                backgroundColor: 'var(--bg-card)',
+                                borderRadius: '10px',
+                                border: '1px solid rgba(245, 158, 11, 0.25)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '10px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      padding: '2px 8px',
+                                      borderRadius: '6px',
+                                      backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                                      color: 'var(--accent-cyan)',
+                                      textTransform: 'uppercase',
+                                    }}
+                                  >
+                                    📝 {asg.type || 'Assignment'}
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      color: 'var(--warning)',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    ⚠️ {asg.reviewReason || 'Please verify due date and time'}
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() => confirmAssignment(asg.originalIndex)}
+                                    style={{ fontSize: '12px', padding: '4px 12px' }}
+                                  >
+                                    ✓ Confirm Deliverable
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => rejectAssignment(asg.originalIndex)}
+                                    style={{ fontSize: '12px', padding: '4px 10px', color: 'var(--danger)' }}
+                                    title="Reject as false positive"
+                                  >
+                                    ✕ Reject (False Positive)
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: '8px', alignItems: 'center' }}>
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Title
+                                  </label>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={asg.title}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'title', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px', fontWeight: 600 }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Due Date
+                                  </label>
+                                  <input
+                                    type="date"
+                                    className="form-input"
+                                    value={asg.dueDate || ''}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'dueDate', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Due Time
+                                  </label>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={asg.dueTime || '23:59'}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'dueTime', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Weight (%)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    className="form-input"
+                                    value={asg.weightPercent || ''}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'weightPercent', Number(e.target.value))}
+                                    placeholder="e.g. 15"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Priority
+                                  </label>
+                                  <select
+                                    className="form-input"
+                                    value={asg.priority || 'Medium'}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'priority', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  >
+                                    <option value="Low">Low</option>
+                                    <option value="Medium">Medium</option>
+                                    <option value="High">High</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+
+                          {/* Uncertain Exams */}
+                          {examNeedsReview.map((exam) => (
+                            <div
+                              key={exam.id || exam.originalIndex}
+                              style={{
+                                padding: '14px',
+                                backgroundColor: 'var(--bg-card)',
+                                borderRadius: '10px',
+                                border: '1px solid rgba(245, 158, 11, 0.25)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '10px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      padding: '2px 8px',
+                                      borderRadius: '6px',
+                                      backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                                      color: 'var(--danger)',
+                                      textTransform: 'uppercase',
+                                    }}
+                                  >
+                                    📅 Exam
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      color: 'var(--warning)',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    ⚠️ {exam.reviewReason || 'Please verify exam date and time'}
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    onClick={() => confirmExam(exam.originalIndex)}
+                                    style={{ fontSize: '12px', padding: '4px 12px' }}
+                                  >
+                                    ✓ Confirm Exam
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => rejectExam(exam.originalIndex)}
+                                    style={{ fontSize: '12px', padding: '4px 10px', color: 'var(--danger)' }}
+                                    title="Reject as false positive"
+                                  >
+                                    ✕ Reject (False Positive)
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: '8px', alignItems: 'center' }}>
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Title
+                                  </label>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={exam.title}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'title', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px', fontWeight: 600 }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Exam Date
+                                  </label>
+                                  <input
+                                    type="date"
+                                    className="form-input"
+                                    value={exam.date || ''}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'date', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Time
+                                  </label>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={exam.time || ''}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'time', e.target.value)}
+                                    placeholder="e.g. 19:00"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Location
+                                  </label>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={exam.location || ''}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'location', e.target.value)}
+                                    placeholder="Room 101"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>
+                                    Weight (%)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    className="form-input"
+                                    value={exam.weightPercent || ''}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'weightPercent', Number(e.target.value))}
+                                    placeholder="30"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SECTION 2: CONFIRMED DELIVERABLES */}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                        <span style={{ fontSize: '18px' }}>✅</span>
+                        <div>
+                          <strong style={{ color: 'var(--text-primary)', fontSize: '14px' }}>
+                            Confirmed Deliverables ({totalCourseConfirmed})
+                          </strong>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            These items will be saved to your dashboard, calendar, and study plan upon setup.
+                          </div>
+                        </div>
+                      </div>
+
+                      {totalCourseConfirmed === 0 ? (
                         <div
                           style={{
-                            display: 'grid',
-                            gridTemplateColumns: '1.2fr 1fr 1.2fr 0.8fr',
-                            gap: '8px',
-                            alignItems: 'center',
+                            padding: '24px',
+                            textAlign: 'center',
+                            backgroundColor: 'var(--bg-card)',
+                            borderRadius: '10px',
+                            border: '1px dashed var(--border-subtle)',
+                            color: 'var(--text-muted)',
+                            fontSize: '13px',
                           }}
                         >
-                          <div>
-                            <label
-                              style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted)',
-                                display: 'block',
-                              }}
-                            >
-                              Exam Date
-                            </label>
-                            <input
-                              type="date"
-                              className="form-input"
-                              value={exam.date || ''}
-                              onChange={(e) => updateExam(eIdx, 'date', e.target.value)}
-                              style={{ width: '100%', fontSize: '12px' }}
-                            />
-                          </div>
-
-                          <div>
-                            <label
-                              style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted)',
-                                display: 'block',
-                              }}
-                            >
-                              Exam Time
-                            </label>
-                            <input
-                              type="text"
-                              className="form-input"
-                              value={exam.time || ''}
-                              onChange={(e) => updateExam(eIdx, 'time', e.target.value)}
-                              placeholder="e.g. 19:00 - 22:00"
-                              style={{ width: '100%', fontSize: '12px' }}
-                            />
-                          </div>
-
-                          <div>
-                            <label
-                              style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted)',
-                                display: 'block',
-                              }}
-                            >
-                              Location / Room
-                            </label>
-                            <input
-                              type="text"
-                              className="form-input"
-                              value={exam.location || ''}
-                              onChange={(e) => updateExam(eIdx, 'location', e.target.value)}
-                              placeholder="e.g. Marion Hall 150"
-                              style={{ width: '100%', fontSize: '12px' }}
-                            />
-                          </div>
-
-                          <div>
-                            <label
-                              style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted)',
-                                display: 'block',
-                              }}
-                            >
-                              Weight (%)
-                            </label>
-                            <input
-                              type="number"
-                              className="form-input"
-                              value={exam.weightPercent || ''}
-                              onChange={(e) =>
-                                updateExam(eIdx, 'weightPercent', Number(e.target.value))
-                              }
-                              placeholder="e.g. 30"
-                              style={{ width: '100%', fontSize: '12px' }}
-                            />
-                          </div>
+                          No confirmed deliverables yet. Confirm any items needing review above or click &ldquo;+ Add Missing Deliverable&rdquo;.
                         </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {/* Confirmed Assignments */}
+                          {asgConfirmed.map((asg) => (
+                            <div
+                              key={asg.id || asg.originalIndex}
+                              style={{
+                                padding: '12px 14px',
+                                backgroundColor: 'var(--bg-card)',
+                                borderRadius: '10px',
+                                border: '1px solid var(--border-subtle)',
+                                borderLeft: '4px solid var(--success)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      padding: '2px 8px',
+                                      borderRadius: '6px',
+                                      backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                                      color: 'var(--accent-cyan)',
+                                      textTransform: 'uppercase',
+                                    }}
+                                  >
+                                    📝 {asg.type || 'Assignment'}
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: 600,
+                                      color: 'var(--success)',
+                                    }}
+                                  >
+                                    ✓ Confirmed (High Confidence)
+                                  </span>
+                                </div>
 
-                        {exam.needsReview && (
-                          <div
-                            style={{
-                              fontSize: '11px',
-                              color: 'var(--warning)',
-                              backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                              border: '1px solid rgba(245, 158, 11, 0.3)',
-                              borderRadius: '6px',
-                              padding: '5px 8px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                            }}
-                          >
-                            <span>⚠️</span> <strong>Needs Student Review:</strong>{' '}
-                            {exam.reviewReason || 'Please verify exam date, time, and location.'}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                                <button
+                                  type="button"
+                                  onClick={() => rejectAssignment(asg.originalIndex)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--text-muted)',
+                                    cursor: 'pointer',
+                                    fontSize: '12px',
+                                  }}
+                                  title="Reject (False Positive)"
+                                >
+                                  ✕ Remove
+                                </button>
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr', gap: '8px', alignItems: 'center' }}>
+                                <div>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={asg.title}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'title', e.target.value)}
+                                    style={{ width: '100%', fontSize: '13px', fontWeight: 600 }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <input
+                                    type="date"
+                                    className="form-input"
+                                    value={asg.dueDate || ''}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'dueDate', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={asg.dueTime || '23:59'}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'dueTime', e.target.value)}
+                                    placeholder="23:59"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <input
+                                    type="number"
+                                    className="form-input"
+                                    value={asg.weightPercent || ''}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'weightPercent', Number(e.target.value))}
+                                    placeholder="Weight %"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <select
+                                    className="form-input"
+                                    value={asg.priority || 'Medium'}
+                                    onChange={(e) => updateAssignment(asg.originalIndex, 'priority', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  >
+                                    <option value="Low">Low</option>
+                                    <option value="Medium">Medium</option>
+                                    <option value="High">High</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+
+                          {/* Confirmed Exams */}
+                          {examConfirmed.map((exam) => (
+                            <div
+                              key={exam.id || exam.originalIndex}
+                              style={{
+                                padding: '12px 14px',
+                                backgroundColor: 'var(--bg-card)',
+                                borderRadius: '10px',
+                                border: '1px solid var(--border-subtle)',
+                                borderLeft: '4px solid var(--danger)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      padding: '2px 8px',
+                                      borderRadius: '6px',
+                                      backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                                      color: 'var(--danger)',
+                                      textTransform: 'uppercase',
+                                    }}
+                                  >
+                                    📅 Exam
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: 600,
+                                      color: 'var(--success)',
+                                    }}
+                                  >
+                                    ✓ Confirmed (High Confidence)
+                                  </span>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => rejectExam(exam.originalIndex)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--text-muted)',
+                                    cursor: 'pointer',
+                                    fontSize: '12px',
+                                  }}
+                                  title="Reject (False Positive)"
+                                >
+                                  ✕ Remove
+                                </button>
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr 1fr', gap: '8px', alignItems: 'center' }}>
+                                <div>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={exam.title}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'title', e.target.value)}
+                                    style={{ width: '100%', fontSize: '13px', fontWeight: 600 }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <input
+                                    type="date"
+                                    className="form-input"
+                                    value={exam.date || ''}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'date', e.target.value)}
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={exam.time || ''}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'time', e.target.value)}
+                                    placeholder="Time"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={exam.location || ''}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'location', e.target.value)}
+                                    placeholder="Room"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+
+                                <div>
+                                  <input
+                                    type="number"
+                                    className="form-input"
+                                    value={exam.weightPercent || ''}
+                                    onChange={(e) => updateExam(exam.originalIndex, 'weightPercent', Number(e.target.value))}
+                                    placeholder="Weight %"
+                                    style={{ width: '100%', fontSize: '12px' }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
+                );
+              })()}
             </div>
           )}
 
@@ -1856,10 +2207,14 @@ export function SyllabusImport() {
               </div>
 
               <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                Ready to configure: <strong>{importedCourses.length} Courses</strong> •{' '}
-                <strong>{totalTopicsCount} Topics</strong> •{' '}
-                <strong>{totalAssignmentsCount} Assignments</strong> •{' '}
-                <strong>{totalExamsCount} Exams</strong>
+                Ready to configure: <strong>{importedCourses.length} Course{importedCourses.length > 1 ? 's' : ''}</strong> •{' '}
+                <strong style={{ color: 'var(--success)' }}>{totalConfirmedDeliverables} Confirmed Deliverable{totalConfirmedDeliverables !== 1 ? 's' : ''}</strong> •{' '}
+                <strong>{totalTopicsCount} Topics</strong>
+                {totalNeedsReviewCount > 0 && (
+                  <span style={{ color: 'var(--warning)', marginLeft: '6px' }}>
+                    (⚠️ {totalNeedsReviewCount} unconfirmed in Needs Review will be omitted)
+                  </span>
+                )}
               </div>
             </div>
 
@@ -2246,6 +2601,147 @@ export function SyllabusImport() {
                 }}
               >
                 Select "Merge" & Continue
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Add Missing Deliverable Modal (Phase 4.1) */}
+      {showAddDeliverableModal && (
+        <Modal
+          isOpen={showAddDeliverableModal}
+          onClose={() => setShowAddDeliverableModal(false)}
+          title={`Add Deliverable to ${activeCourse?.name || 'Course'}`}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+              Add an assignment, project, or exam that was not found in the syllabus text.
+            </p>
+
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                Deliverable Type
+              </label>
+              <select
+                className="form-input"
+                value={newDelivKind}
+                onChange={(e) => setNewDelivKind(e.target.value)}
+                style={{ width: '100%' }}
+              >
+                <option value="assignment">Assignment / Homework</option>
+                <option value="exam">Midterm / Exam / Final</option>
+                <option value="project">Project / Milestone</option>
+                <option value="quiz">Quiz / Mini-Test</option>
+                <option value="lab">Lab Report / Practicum</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                Title <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g. Assignment 2: Graph Algorithms"
+                value={newDelivTitle}
+                onChange={(e) => setNewDelivTitle(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  {newDelivKind === 'exam' ? 'Exam Date' : 'Due Date'}
+                </label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={newDelivDate}
+                  onChange={(e) => setNewDelivDate(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Time
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="23:59"
+                  value={newDelivTime}
+                  onChange={(e) => setNewDelivTime(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+
+            {newDelivKind === 'exam' && (
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Exam Location / Room
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Site Hall 201"
+                  value={newDelivLocation}
+                  onChange={(e) => setNewDelivLocation(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Weight (% of Final Grade)
+                </label>
+                <input
+                  type="number"
+                  className="form-input"
+                  placeholder="15"
+                  value={newDelivWeight}
+                  onChange={(e) => setNewDelivWeight(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Priority
+                </label>
+                <select
+                  className="form-input"
+                  value={newDelivPriority}
+                  onChange={(e) => setNewDelivPriority(e.target.value)}
+                  style={{ width: '100%' }}
+                >
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowAddDeliverableModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleCreateCustomDeliverable}
+              >
+                ✓ Add & Confirm Deliverable
               </button>
             </div>
           </div>

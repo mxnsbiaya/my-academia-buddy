@@ -119,4 +119,64 @@ Horaire: Lundi 10h00 - 11h30 et Mercredi 10h00 - 11h30 | Salle: STE Hall A
     expect(parsed.exams.length).toBe(2);
     expect(parsed.metadata.itemsNeedingReview).toBeGreaterThanOrEqual(1);
   });
+
+  it('strictly suppresses false assignments from general grading policy statements', () => {
+    // Problem identified in Phase 4.1 prompt:
+    const policyParagraph = `
+Grading Policy and Course Breakdown:
+Projects account for 42% and assignments account for 39% of the final grade.
+Participation and in-class activities make up 19% of the total mark.
+Midterm exams are worth 30% of the overall grade.
+Les devoirs et examens comptent pour 60% de la note finale.
+Evaluation criteria: Homework 25%, Labs 15%, Final 60%.
+`;
+
+    const assignments = extractAssignments(policyParagraph, [], 'SEG 3103', 2026);
+    const exams = extractExams(policyParagraph, [], 'SEG 3103', 2026);
+
+    // General grading policy lines must NEVER create assignments or exams
+    expect(assignments.length).toBe(0);
+    expect(exams.length).toBe(0);
+
+    // But extractGradingScheme should capture the category weights accurately
+    const parsed = parseSyllabusDocument({ text: policyParagraph });
+    expect(parsed.assignments.length).toBe(0);
+    expect(parsed.exams.length).toBe(0);
+    expect(parsed.gradingScheme.some((g) => g.component.toLowerCase().includes('project'))).toBe(true);
+    expect(parsed.gradingScheme.some((g) => g.component.toLowerCase().includes('assignment'))).toBe(true);
+  });
+
+  it('distinguishes genuine numbered assignments from category weight totals', () => {
+    const syllabusWithCategoriesAndTasks = `
+Grading Breakdown:
+Assignments: 30%
+Projects: 40%
+Final Exam: 30%
+
+Schedule of Deliverables:
+Assignment 1 — October 15 — 10%
+Assignment 2 — November 10 — 20%
+Project Phase 1: Due on October 30 (15%)
+Project Final: Due on December 2 (25%)
+Midterm 2 — November 12 — 25%
+`;
+
+    const assignments = extractAssignments(syllabusWithCategoriesAndTasks, [], 'CSI 2110', 2026);
+    const exams = extractExams(syllabusWithCategoriesAndTasks, [], 'CSI 2110', 2026);
+
+    // Only the 4 concrete assignments and 1 midterm should be extracted
+    expect(assignments.length).toBe(4);
+    expect(assignments.map((a) => a.title)).toEqual([
+      'Assignment 1',
+      'Assignment 2',
+      'Project Phase 1',
+      'Project Final',
+    ]);
+    expect(assignments[0].dueDate).toBe('2026-10-15');
+    expect(assignments[0].weightPercent).toBe(10);
+
+    expect(exams.length).toBe(1);
+    expect(exams[0].title).toBe('Midterm Exam 2');
+    expect(exams[0].date).toBe('2026-11-12');
+  });
 });

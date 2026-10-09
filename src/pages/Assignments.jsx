@@ -31,12 +31,31 @@ export function Assignments() {
   const [editError, setEditError] = useState('');
 
   // Filters & sorting
-  const [filterStatus, setFilterStatus] = useState('all'); // all | pending | completed
+  const [filterStatus, setFilterStatus] = useState('pending'); // pending | completed | all
   const [filterCourse, setFilterCourse] = useState('all');
   const [sortBy, setSortBy] = useState('dueDate'); // dueDate | priority | title
 
   // Item deletion state
   const [assignmentToDelete, setAssignmentToDelete] = useState(null);
+
+  // Completion confirmation modal state (Phase 4.1)
+  const [assignmentToComplete, setAssignmentToComplete] = useState(null);
+  const [completionType, setCompletionType] = useState('work_completed'); // 'work_completed' | 'submitted'
+
+  const handleRequestComplete = (assignment) => {
+    if (assignment.completed) {
+      toggleAssignmentCompleted(assignment.id, { reopen: true });
+    } else {
+      setAssignmentToComplete(assignment);
+      setCompletionType('work_completed');
+    }
+  };
+
+  const handleConfirmComplete = () => {
+    if (!assignmentToComplete) return;
+    toggleAssignmentCompleted(assignmentToComplete.id, { completionType });
+    setAssignmentToComplete(null);
+  };
 
   const handleCreateSubmit = (e) => {
     e.preventDefault();
@@ -266,21 +285,35 @@ export function Assignments() {
 
         {/* Right Column: List & Filters */}
         <div className="list-column">
-          <div className="filter-bar">
-            <div className="filter-group">
-              <label htmlFor="filter-status" className="filter-label">Status:</label>
-              <select
-                id="filter-status"
-                className="filter-select"
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-              >
-                <option value="all">All ({assignments.length})</option>
-                <option value="pending">Pending ({assignments.filter((a) => !a.completed).length})</option>
-                <option value="completed">Completed ({assignments.filter((a) => a.completed).length})</option>
-              </select>
-            </div>
+          {/* Quick Tab Switcher */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+            <button
+              type="button"
+              className={`btn btn-sm ${filterStatus === 'pending' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterStatus('pending')}
+              style={{ fontWeight: 600, fontSize: '13px', padding: '6px 14px' }}
+            >
+              Active Deliverables ({assignments.filter((a) => !a.completed).length})
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${filterStatus === 'completed' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterStatus('completed')}
+              style={{ fontWeight: 600, fontSize: '13px', padding: '6px 14px' }}
+            >
+              Completed / History ({assignments.filter((a) => a.completed).length})
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${filterStatus === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterStatus('all')}
+              style={{ fontWeight: 500, fontSize: '13px', padding: '6px 14px' }}
+            >
+              All ({assignments.length})
+            </button>
+          </div>
 
+          <div className="filter-bar">
             {courses.length > 0 && (
               <div className="filter-group">
                 <label htmlFor="filter-course" className="filter-label">Course:</label>
@@ -318,9 +351,11 @@ export function Assignments() {
               <span className="empty-icon" aria-hidden="true">📝</span>
               <h3>No assignments found</h3>
               <p>
-                {assignments.length === 0
-                  ? 'Add your upcoming deliverables using the form on the left.'
-                  : 'No assignments match the selected filters.'}
+                {filterStatus === 'completed'
+                  ? 'No completed assignments yet. Mark assignments completed when you finish them.'
+                  : filterStatus === 'pending'
+                  ? 'You are all caught up! No active pending assignments.'
+                  : 'Add your upcoming deliverables using the form on the left.'}
               </p>
             </div>
           ) : (
@@ -341,7 +376,7 @@ export function Assignments() {
                         <button
                           type="button"
                           className={`custom-checkbox ${assignment.completed ? 'checkbox-checked' : ''}`}
-                          onClick={() => toggleAssignmentCompleted(assignment.id)}
+                          onClick={() => handleRequestComplete(assignment)}
                           aria-label={
                             assignment.completed
                               ? `Mark "${assignment.title}" as incomplete`
@@ -357,7 +392,23 @@ export function Assignments() {
                           <h3 className={`task-title ${assignment.completed ? 'task-title-struck' : ''}`}>
                             {assignment.title}
                           </h3>
-                          <Badge variant={assignment.priority}>{assignment.priority} Priority</Badge>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            {assignment.completed && (
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                  color: 'var(--success)',
+                                }}
+                              >
+                                {assignment.completionType === 'submitted' ? '🚀 Submitted' : '✅ Work Completed'}
+                              </span>
+                            )}
+                            <Badge variant={assignment.priority}>{assignment.priority} Priority</Badge>
+                          </div>
                         </div>
 
                         <div className="task-meta-row">
@@ -379,14 +430,26 @@ export function Assignments() {
                     </div>
 
                     <div className="task-actions-col">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-secondary"
-                        onClick={() => openEditModal(assignment)}
-                        aria-label={`Edit ${assignment.title}`}
-                      >
-                        Edit
-                      </button>
+                      {assignment.completed ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => toggleAssignmentCompleted(assignment.id, { reopen: true })}
+                          title="Reopen task and move back to active deliverables"
+                          style={{ fontSize: '12px' }}
+                        >
+                          ↩ Reopen Task
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => openEditModal(assignment)}
+                          aria-label={`Edit ${assignment.title}`}
+                        >
+                          Edit
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-danger"
@@ -403,6 +466,114 @@ export function Assignments() {
           )}
         </div>
       </div>
+
+      {/* Completion Confirmation Modal (Phase 4.1) */}
+      {assignmentToComplete && (
+        <Modal
+          isOpen={Boolean(assignmentToComplete)}
+          onClose={() => setAssignmentToComplete(null)}
+          title={`Complete Assignment: ${assignmentToComplete.title}`}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+              Confirm your progress on <strong>{assignmentToComplete.title}</strong>
+              {assignmentToComplete.course ? ` (${assignmentToComplete.course})` : ''}.
+              This task will be archived to your <strong>Completed / History</strong> tab and removed from active deadlines.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  border:
+                    completionType === 'work_completed'
+                      ? '2px solid var(--accent-cyan)'
+                      : '1px solid var(--border-default)',
+                  backgroundColor:
+                    completionType === 'work_completed'
+                      ? 'rgba(56, 189, 248, 0.08)'
+                      : 'var(--bg-surface)',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="completionType"
+                  value="work_completed"
+                  checked={completionType === 'work_completed'}
+                  onChange={() => setCompletionType('work_completed')}
+                  style={{ marginTop: '3px' }}
+                />
+                <div>
+                  <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
+                    ✅ Work completed
+                  </strong>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    I have finished all tasks, problem sets, or writing for this deliverable.
+                  </div>
+                </div>
+              </label>
+
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  border:
+                    completionType === 'submitted'
+                      ? '2px solid var(--accent-cyan)'
+                      : '1px solid var(--border-default)',
+                  backgroundColor:
+                    completionType === 'submitted'
+                      ? 'rgba(56, 189, 248, 0.08)'
+                      : 'var(--bg-surface)',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="completionType"
+                  value="submitted"
+                  checked={completionType === 'submitted'}
+                  onChange={() => setCompletionType('submitted')}
+                  style={{ marginTop: '3px' }}
+                />
+                <div>
+                  <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
+                    🚀 Submitted
+                  </strong>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    I have officially submitted this assignment to my professor or portal.
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setAssignmentToComplete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirmComplete}
+              >
+                ✓ Confirm & Complete Task
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Edit Modal */}
       <Modal

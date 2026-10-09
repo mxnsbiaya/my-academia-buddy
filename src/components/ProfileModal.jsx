@@ -223,11 +223,30 @@ function ProfileForm({ studentProfile, onSave, onCancel }) {
 }
 
 export function ProfileModal({ isOpen, onClose }) {
-  const { studentProfile, updateStudentProfile, adaptiveSignals } = useApp();
+  const { studentProfile, updateStudentProfile, adaptiveSignals, openOnboardingModal } = useApp();
+
+  const handleReopenWizard = () => {
+    onClose();
+    setTimeout(() => {
+      openOnboardingModal();
+    }, 200);
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Student Profile & Coach Preferences">
       <div className="profile-modal-container">
+        {/* Quick Setup Guide Shortcut */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '10px 14px', background: 'rgba(56, 189, 248, 0.08)', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>Need to reconfigure your semester from scratch?</span>
+          <button
+            type="button"
+            className="btn btn-xs btn-secondary"
+            onClick={handleReopenWizard}
+          >
+            📋 Reopen Guided Setup Wizard
+          </button>
+        </div>
+
         {/* Observed Adaptive Signals Section */}
         <div className="profile-section" style={{ marginBottom: '18px' }}>
           <h3 className="profile-section-title">Observed Adaptive Signals</h3>
