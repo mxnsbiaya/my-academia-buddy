@@ -1091,7 +1091,27 @@ export function AppProvider({ children }) {
 
   // --- Intelligent Syllabus Import Semester Setup with Duplicate Protection & Merging ---
   const importSemesterFromSyllabi = useCallback(
-    ({ courses: newCoursesList = [], replaceExisting = false }) => {
+    (payload) => {
+      const rawList = Array.isArray(payload) ? payload : (payload?.courses || []);
+      const replaceExisting = Array.isArray(payload) ? false : Boolean(payload?.replaceExisting);
+
+      // Normalize each imported item in case it came directly from parseSyllabusDocument ({ course, topics, assignments, exams })
+      const newCoursesList = rawList.map((item) => {
+        if (item && item.course && typeof item.course === 'object') {
+          return {
+            ...item.course,
+            topics: item.topics || [],
+            assignments: item.assignments || [],
+            exams: item.exams || [],
+            gradingScheme: item.gradingScheme || [],
+            metadata: item.metadata || {},
+            importStrategy: item.importStrategy,
+            contentHash: item.contentHash,
+          };
+        }
+        return item;
+      });
+
       let baseCourses = replaceExisting ? [] : [...courses];
       let baseTopics = replaceExisting ? [] : [...syllabusTopics];
       let baseAssignments = replaceExisting ? [] : [...assignments];

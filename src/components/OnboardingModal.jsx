@@ -129,10 +129,18 @@ export function OnboardingModal({ isOpen, onClose }) {
   const handleLoadSampleSyllabi = () => {
     setIsUploadingSyllabus(true);
     try {
-      const parsedList = SAMPLE_SYLLABI_PACK.map((sample) =>
-        parseSyllabus(sample.text, { fileName: sample.fileName, language: sample.language })
-      );
-      importSemesterFromSyllabi(parsedList);
+      const parsedList = SAMPLE_SYLLABI_PACK.map((sample, idx) => {
+        const parsedResult = parseSyllabus(sample.text, { fileName: sample.fileName, language: sample.language, colorIndex: idx });
+        return {
+          ...parsedResult.course,
+          topics: parsedResult.topics || [],
+          assignments: parsedResult.assignments || [],
+          exams: parsedResult.exams || [],
+          gradingScheme: parsedResult.gradingScheme || [],
+          metadata: parsedResult.metadata || {},
+        };
+      });
+      importSemesterFromSyllabi({ courses: parsedList, replaceExisting: false });
       setIsUploadingSyllabus(false);
       addToast('Loaded 5 sample course syllabi with deliverables!', 'success', 5000);
     } catch {
@@ -150,7 +158,15 @@ export function OnboardingModal({ isOpen, onClose }) {
       const text = await file.text();
       const parsed = parseSyllabus(text, { fileName: file.name });
       if (parsed?.course?.name) {
-        importSemesterFromSyllabi([parsed]);
+        const courseData = {
+          ...parsed.course,
+          topics: parsed.topics || [],
+          assignments: parsed.assignments || [],
+          exams: parsed.exams || [],
+          gradingScheme: parsed.gradingScheme || [],
+          metadata: parsed.metadata || {},
+        };
+        importSemesterFromSyllabi({ courses: [courseData], replaceExisting: false });
         addToast(`Parsed and imported syllabus for ${parsed.course.name}!`, 'success', 5000);
       } else {
         addToast('Could not extract course code from syllabus. You can enter it manually.', 'warning', 5000);

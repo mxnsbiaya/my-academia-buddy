@@ -522,6 +522,7 @@ export function Timetable() {
       ) : viewMode === 'grid' ? (
         /* Weekly Grid View */
         <div
+          className="timetable-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
@@ -689,7 +690,7 @@ export function Timetable() {
         </div>
       ) : (
         /* List View */
-        <div className="card" style={{ padding: '0px', overflow: 'hidden' }}>
+        <div className="timetable-list card" style={{ padding: '0px', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
             <thead>
               <tr style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-default)' }}>
