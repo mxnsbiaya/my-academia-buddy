@@ -45,19 +45,26 @@ describe('Academic Coach Service — Domain Logic', () => {
     },
   ];
 
+  const today = new Date();
+  const getRelativeDateStr = (daysAhead) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + daysAhead);
+    return d.toISOString().split('T')[0];
+  };
+
   const sampleAssignments = [
     {
       id: 'asg-1',
       title: 'Assignment 1 — Graph Algorithms',
       course: 'CSI 2110 Data Structures',
-      dueDate: '2026-10-15',
+      dueDate: getRelativeDateStr(5),
       completed: false,
     },
     {
       id: 'asg-2',
       title: 'Project Milestone 1',
       course: 'SEG 2105 Software Engineering',
-      dueDate: '2026-10-20',
+      dueDate: getRelativeDateStr(10),
       completed: true,
     },
   ];
@@ -67,7 +74,7 @@ describe('Academic Coach Service — Domain Logic', () => {
       id: 'exam-1',
       title: 'Midterm Exam',
       course: 'CSI 2110 Data Structures',
-      date: '2026-10-18',
+      date: getRelativeDateStr(3),
     },
   ];
 
